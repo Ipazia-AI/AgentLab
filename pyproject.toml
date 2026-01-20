@@ -48,10 +48,14 @@ dependencies = [
     "python-slugify",
     "pillow",
     "gymnasium>=0.27",
-    "torch>=2.2.2",
+    "torch>=2.9.1",
     "anthropic>=0.62.0",
     "litellm>=1.75.3",
     "python-dotenv>=1.1.1",
+    "langchain_core>=0.3.11",
+    "langchain_openai>=0.2.3",
+    "browsergym-workarena>=0.5.1",
+    "langgraph"
 ]
 
 [project.optional-dependencies]
