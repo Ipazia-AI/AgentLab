@@ -11,8 +11,102 @@
             "program": "${file}",
             "console": "integratedTerminal",
             "justMyCode": false,
+            "python": "${workspaceFolder}/.venv/bin/python",
             "env": {
                 "AGENTLAB_DEBUG": "1"
+            }
+        },
+        {
+            "name": "agentq_amazon",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/run_agentq_amazon.py",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "cwd": "${workspaceFolder}",
+            "python": "${workspaceFolder}/.venv/bin/python",
+            "env": {
+                "AGENTLAB_DEBUG": "1",
+                "PYTHONPATH": "${workspaceFolder}/src"
+            }
+        },
+        {
+            "name": "playwright_forking",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/reproduce_browser_forking.py",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "cwd": "${workspaceFolder}",
+            "python": "${workspaceFolder}/.venv/bin/python",
+            "env": {
+                "AGENTLAB_DEBUG": "1",
+                "PYTHONPATH": "${workspaceFolder}/src"
+            }
+        },
+        {
+            "name": "MiniWoB SynthesisAgent",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/main_synthesis_workarena.py",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "cwd": "${workspaceFolder}",
+            "python": "${workspaceFolder}/.venv/bin/python",
+            "env": {
+                "AGENTLAB_DEBUG": "1",
+                "PYTHONPATH": "${workspaceFolder}/src"
+            }
+        },
+        {
+            "name": "MiniWoB AgentQ",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/run_agentq_miniwob.py",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "cwd": "${workspaceFolder}",
+            "python": "${workspaceFolder}/.venv/bin/python",
+            "env": {
+                "AGENTLAB_DEBUG": "1",
+                "PYTHONPATH": "${workspaceFolder}/src"
+            }
+        },
+        {
+            "name": "MiniWoB Breakpoints",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/main_synthesis_workarena.py",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "cwd": "${workspaceFolder}",
+            "python": "${workspaceFolder}/.venv/bin/python",
+            "env": {
+                "AGENTLAB_DEBUG": "1",
+                "PYTHONPATH": "${workspaceFolder}/src"
+            },
+            "stopOnEntry": false,
+            // Set breakpoints in:
+            // - src/agentlab/agents/synthesis_agent/synthesis_agent.py:get_action()
+            // - src/agentlab/agents/synthesis_agent/synthesis_agent.py:_generate_policy()
+            // - src/agentlab/agents/synthesis_agent/micro_policy.py:from_llm_response()
+        },
+        {
+            "name": "MiniWoB  Unit Tests",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "pytest",
+            "args": [
+                "tests/agents/test_synthesis_agent.py",
+                "-v",
+                "-s"
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "cwd": "${workspaceFolder}",
+            "python": "${workspaceFolder}/.venv/bin/python",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
             }
         }
     ]
