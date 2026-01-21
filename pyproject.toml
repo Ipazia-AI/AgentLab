@@ -28,6 +28,7 @@ classifiers = [
     "License :: OSI Approved :: Apache Software License",
 ]
 dependencies = [
+    "browsergym-workarena>=0.5.1",
     "pydantic~=2.9",
     "dask",
     "distributed",
@@ -40,7 +41,7 @@ dependencies = [
     "ipython",
     "pyyaml>=6",
     "pandas",
-    "gradio>=5.5",
+    "gradio==5.41.1",
     "gitpython",
     "requests",
     "matplotlib",
@@ -48,7 +49,7 @@ dependencies = [
     "python-slugify",
     "pillow",
     "gymnasium>=0.27",
-    "torch>=2.2.2",
+    "torch>=2.9.1",
     "anthropic>=0.62.0",
     "litellm>=1.75.3",
     "python-dotenv>=1.1.1",
