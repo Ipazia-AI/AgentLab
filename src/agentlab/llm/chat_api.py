@@ -6,12 +6,13 @@ from dataclasses import dataclass
 from functools import partial
 from typing import Optional
 
-import agentlab.llm.tracking as tracking
 import anthropic
 import openai
+from openai import NOT_GIVEN, OpenAI
+
+import agentlab.llm.tracking as tracking
 from agentlab.llm.base_api import AbstractChatModel, BaseModelArgs
 from agentlab.llm.llm_utils import AIMessage, Discussion
-from openai import NOT_GIVEN, OpenAI
 
 
 def make_system_message(content: str) -> dict:
@@ -79,6 +80,7 @@ class CheatMiniWoBLLMArgs:
 class OpenRouterModelArgs(BaseModelArgs):
     """Serializable object for instantiating a generic chat model with an OpenAI
     model."""
+    min_retry_wait_time: int = 60
 
     def make_model(self):
         return OpenRouterChatModel(
