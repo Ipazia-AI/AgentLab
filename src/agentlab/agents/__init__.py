@@ -10,4 +10,6 @@ This module contains the agent implementations for AgentLab. With currently:
 - TapeAgent: An agent that uses the Tape data structure to perform actions
 
 - VisualWebArenaAgent: An implementation of the agent used in WebArena and VisualWebArena
+
+- AgentQAgent: MCTS-based agent with critique and refinement (AgentQ implementation)
 """

@@ -417,6 +417,10 @@ class ExpArgs:
             agent = self.agent_args.make_agent()
             if hasattr(agent, "set_task_name"):
                 agent.set_task_name(self.env_args.task_name)
+            if hasattr(agent, "set_env_args"):
+                agent.set_env_args(self.env_args)
+            if hasattr(agent, "set_seed"):
+                agent.set_seed(self.env_args.task_seed or 0)
 
             logger.debug("Agent created.")
 
