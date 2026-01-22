@@ -66,7 +66,7 @@ dev = [
 requires-dist = [
     { name = "anthropic", specifier = ">=0.62.0" },
     { name = "browsergym", specifier = ">=0.7.1" },
-    { name = "browsergym-workarena", specifier = ">=0.5.1" },
+    { name = "browsergym-workarena", specifier = ">=0.5.2" },
     { name = "contexttimer" },
     { name = "dask" },
     { name = "distributed" },
@@ -507,7 +507,7 @@ wheels = [
 
 [[package]]
 name = "browsergym-workarena"
-version = "0.5.1"
+version = "0.5.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "browsergym-core" },
@@ -519,9 +519,9 @@ dependencies = [
     { name = "tenacity" },
     { name = "tqdm" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/91/a2/947e3d828ae9002ef1ee2da659d5aa362094b5f477f9522e56378b303573/browsergym_workarena-0.5.1.tar.gz", hash = "sha256:110ba0631b2b37f64b070ec13f8a023a48c8846aa674cd2c8a763c6d3dcb0079", size = 6612200, upload-time = "2025-12-06T18:12:33.069Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/55/59/accdd20c02458fef43018b29ad9845ad10dd3f7529b766a7ab235df7a2e5/browsergym_workarena-0.5.2.tar.gz", hash = "sha256:952b567c475ee8105f98bcccdbea0f3c825df875fbeba493682469371dab65a6", size = 6615395, upload-time = "2026-01-22T13:25:09.034Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/e8/e6/845d3a94ae549ccfddf6c7e418db7426f70855231207ca035296641441f1/browsergym_workarena-0.5.1-py3-none-any.whl", hash = "sha256:91f1006a6b32b1198cf9581157b4c79cb93294ba019169f8df157a0f7b7cf018", size = 6782989, upload-time = "2025-12-06T18:12:30.975Z" },
+    { url = "https://files.pythonhosted.org/packages/99/f6/e0f4e8d57ca744a4c3dd530f94e728ce26a17f6ca6a96cf5db54a8286d91/browsergym_workarena-0.5.2-py3-none-any.whl", hash = "sha256:6f30f7c063947a1a4ad589c192ba7b01d4e5b6218321e989eb2153c48ba60fed", size = 6783845, upload-time = "2026-01-22T13:25:07.349Z" },
 ]
 
 [[package]]
