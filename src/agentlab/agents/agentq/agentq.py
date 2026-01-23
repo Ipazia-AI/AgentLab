@@ -23,6 +23,7 @@ class AgentQArgs(GenericAgentArgs):
     """
     AgentQ configuration with mixed Q-value support (Agent Q paper Eq. 10).
     """
+
     mcts_budget: int = 5
     mcts_max_workers: int = 4
     mcts_rollout_depth: int = 3
@@ -38,14 +39,14 @@ class AgentQArgs(GenericAgentArgs):
     timeout_penalty: float = 0.2  # Penalty multiplier for repeated timeouts
     sync_mcts: bool = False  # Run MCTS iterations synchronously (debug-friendly)
     iteration_timeout: float | None = None  # Timeout per MCTS iteration (seconds)
-    
+
     def __post_init__(self):
         """Override parent to set correct agent name."""
         try:
             self.agent_name = f"AgentQ-{self.chat_model_args.model_name}".replace("/", "_")
         except AttributeError:
             pass
-    
+
     def make_agent(self):
         return AgentQ(
             chat_model_args=self.chat_model_args,
@@ -67,17 +68,18 @@ class AgentQArgs(GenericAgentArgs):
             iteration_timeout=self.iteration_timeout,
         )
 
+
 class AgentQ(GenericAgent):
     """
     AgentQ: MCTS-based web agent with mixed Q-value support.
-    
+
     Implements the Agent Q paper (arXiv 2408.07199) approach:
     - Tournament-style action ranking (AI process supervision)
     - Mixed Q-value: Q = α*Q̃ + (1-α)*Q̂ (Eq. 10)
     - Optional paper-faithful sparse rewards (use_env_reward=True)
     - In-context DPO learning from preference pairs
     """
-    
+
     def __init__(
         self,
         chat_model_args: BaseModelArgs,
@@ -110,14 +112,20 @@ class AgentQ(GenericAgent):
         self.timeout_penalty = timeout_penalty
         self.sync_mcts = sync_mcts
         self.iteration_timeout = iteration_timeout
-        
+
         # Instantiate modular components
-        critic = TournamentCritic(self.chat_llm) if critic_type == "tournament" else AbsoluteCritic(self.chat_llm)
-        selector = AheadKSelector(k=ahead_k) if selection_strategy == "ahead_k" else MaxVisitSelector()
+        critic = (
+            TournamentCritic(self.chat_llm)
+            if critic_type == "tournament"
+            else AbsoluteCritic(self.chat_llm)
+        )
+        selector = (
+            AheadKSelector(k=ahead_k) if selection_strategy == "ahead_k" else MaxVisitSelector()
+        )
 
         # Initialize MCTS engine
         self.mcts = MCTS(
-            chat_llm=self.chat_llm, 
+            chat_llm=self.chat_llm,
             critique_llm=self.chat_llm,
             action_set=self.action_set,
             flags=self.flags,
@@ -133,7 +141,7 @@ class AgentQ(GenericAgent):
             sync_mcts=sync_mcts,
             iteration_timeout=iteration_timeout,
         )
-        
+
         # Buffer for in-context DPO learning (preference pairs from tree)
         self.dpo_pairs = []
         self.max_dpo_pairs = 20
@@ -149,7 +157,7 @@ class AgentQ(GenericAgent):
     def get_action(self, obs):
         if isinstance(obs, tuple):
             obs = obs[0]
-        
+
         # Preprocess obs (add pruned_html, axtree_txt, etc.)
         try:
             obs = self.obs_preprocessor(obs)
@@ -159,33 +167,34 @@ class AgentQ(GenericAgent):
                 obs["pruned_html"] = obs.get("dom_txt", "HTML missing")
             if "axtree_txt" not in obs:
                 obs["axtree_txt"] = "AXTree missing"
-        
+
         # Update history
         self.obs_history.append(obs)
-        
+
         # Extract Goal
         goal = self._extract_goal(obs)
 
         # Convert action history to strings
-        history_strings = [
-            a if isinstance(a, str) else a.get('text', str(a)) 
-            for a in self.actions
-        ]
+        history_strings = [a if isinstance(a, str) else a.get("text", str(a)) for a in self.actions]
 
         # Run MCTS Search with DPO pairs for in-context learning
-        logger.info(f"AgentQ | Starting MCTS search | Budget: {self.mcts_budget} | Workers: {self.mcts_max_workers} | DPO pairs: {len(self.dpo_pairs)} | Time: {datetime.now().strftime('%H:%M:%S')}")
+        logger.info(
+            f"AgentQ | Starting MCTS search | Budget: {self.mcts_budget} | Workers: {self.mcts_max_workers} | DPO pairs: {len(self.dpo_pairs)} | Time: {datetime.now().strftime('%H:%M:%S')}"
+        )
         best_action, root_node = self.mcts.search(
             root_obs=obs,
             root_history=history_strings,
             goal=goal,
             budget=self.mcts_budget,
             dpo_pairs=self.dpo_pairs,
-            max_workers=self.mcts_max_workers
+            max_workers=self.mcts_max_workers,
         )
-        
+
         if not best_action:
             # Fallback to standard GenericAgent behavior
-            logger.warning(f"AgentQ | MCTS returned no action, falling back to GenericAgent | Time: {datetime.now().strftime('%H:%M:%S')}")
+            logger.warning(
+                f"AgentQ | MCTS returned no action, falling back to GenericAgent | Time: {datetime.now().strftime('%H:%M:%S')}"
+            )
             # Remove the obs we already added, since GenericAgent.get_action will add it again
             self.obs_history.pop()
             # Pass original obs (not preprocessed) to GenericAgent
@@ -204,23 +213,27 @@ class AgentQ(GenericAgent):
             self.dpo_pairs.extend(new_pairs)
             # Keep buffer size manageable
             if len(self.dpo_pairs) > self.max_dpo_pairs:
-                self.dpo_pairs = self.dpo_pairs[-self.max_dpo_pairs:]
-            logger.info(f"AgentQ | Generated {len(new_pairs)} DPO pairs | Buffer size: {len(self.dpo_pairs)} | Time: {datetime.now().strftime('%H:%M:%S')}")
-        
+                self.dpo_pairs = self.dpo_pairs[-self.max_dpo_pairs :]
+            logger.info(
+                f"AgentQ | Generated {len(new_pairs)} DPO pairs | Buffer size: {len(self.dpo_pairs)} | Time: {datetime.now().strftime('%H:%M:%S')}"
+            )
+
         # Update agent state
         self.actions.append(best_action)
         thought = f"MCTS Selected: {best_action}"
         self.thoughts.append(thought)
         self.memories.append(None)
-        
+
         # Build chat messages for browsergym chat interface
         # Include goal and action history for user visibility
         chat_messages = Discussion()
-        
+
         # Add system message with goal
-        system_content = f"Goal: {goal}\n\nYou are using MCTS (Monte Carlo Tree Search) to select actions."
+        system_content = (
+            f"Goal: {goal}\n\nYou are using MCTS (Monte Carlo Tree Search) to select actions."
+        )
         chat_messages.add_message(SystemMessage(system_content))
-        
+
         # Add user message with current observation context (if available)
         if obs.get("chat_messages"):
             # Browsergym chat_messages use format: {'role': str, 'message': str, 'timestamp': float}
@@ -235,22 +248,21 @@ class AgentQ(GenericAgent):
         else:
             # Otherwise, create a user message with goal
             chat_messages.add_message({"role": "user", "content": f"Task: {goal}"})
-        
+
         # Add assistant message with the selected action and reasoning
         assistant_content = f"Action: {best_action}\n\nReasoning: {thought}"
         if len(self.actions) > 1:
-            assistant_content += f"\n\nPrevious actions: {', '.join(str(a) for a in self.actions[:-1])}"
+            assistant_content += (
+                f"\n\nPrevious actions: {', '.join(str(a) for a in self.actions[:-1])}"
+            )
         chat_messages.add_message(AIMessage(assistant_content))
-        
+
         # Return format expected by BrowserGym/AgentLab
         agent_info = AgentInfo(
             think=thought,
             chat_messages=chat_messages,
             stats=self.chat_llm.get_stats(),
-            extra_info={
-                "mcts_budget": self.mcts_budget,
-                "dpo_pairs_count": len(self.dpo_pairs)
-            }
+            extra_info={"mcts_budget": self.mcts_budget, "dpo_pairs_count": len(self.dpo_pairs)},
         )
         return best_action, agent_info
 
@@ -258,7 +270,7 @@ class AgentQ(GenericAgent):
         """Extract goal string from observation."""
         if "goal" in obs and obs["goal"]:
             return obs["goal"]
-        
+
         if "goal_object" in obs:
             g_obj = obs["goal_object"]
             if isinstance(g_obj, tuple):
@@ -266,5 +278,5 @@ class AgentQ(GenericAgent):
             if isinstance(g_obj, dict):
                 return g_obj.get("text", "Complete the task.")
             return str(g_obj)
-        
+
         return "Complete the task."

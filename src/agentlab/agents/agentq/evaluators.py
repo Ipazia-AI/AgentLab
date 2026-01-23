@@ -1,6 +1,8 @@
+import hashlib
 import json
 import logging
 import re
+import threading
 from abc import ABC, abstractmethod
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -9,6 +11,31 @@ from agentlab.agents import dynamic_prompting as dp
 from agentlab.agents.agentq.prompts import CritiquePrompt
 
 logger = logging.getLogger(__name__)
+
+_OBS_PROMPT_CACHE: dict[str, str] = {}
+_CACHE_LOCK = threading.Lock()
+
+def _obs_cache_key(obs: Dict[str, Any], obs_flags: dp.ObsFlags) -> str:
+    url = obs.get("url", "")
+    titles = obs.get("open_pages_titles", [])
+    title = titles[0] if titles else ""
+    focused = obs.get("focused_element_bid", "")
+    error = obs.get("last_action_error", "")
+    axtree = obs.get("axtree_txt", "")[:2000]
+    pruned_html = obs.get("pruned_html", "")[:2000]
+    raw = "\n".join([repr(obs_flags), url, title, str(focused), str(error), axtree, pruned_html])
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+def _get_obs_prompt_cached(obs: Dict[str, Any], obs_flags: dp.ObsFlags) -> str:
+    cache_key = _obs_cache_key(obs, obs_flags)
+    with _CACHE_LOCK:
+        cached = _OBS_PROMPT_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+    prompt = dp.Observation(obs, obs_flags).prompt
+    with _CACHE_LOCK:
+        _OBS_PROMPT_CACHE[cache_key] = prompt
+    return prompt
 
 class BaseCritic(ABC):
     @abstractmethod
@@ -20,7 +47,7 @@ class AbsoluteCritic(BaseCritic):
         self.llm = llm
 
     def evaluate(self, goal: str, action: str, current_obs: Dict[str, Any], obs_flags: dp.ObsFlags, pre_obs_summary: Optional[str] = None, action_error: Optional[str] = None) -> float:
-        obs_summary = dp.Observation(current_obs, obs_flags).prompt
+        obs_summary = _get_obs_prompt_cached(current_obs, obs_flags)
         cp = CritiquePrompt(
             goal=goal,
             obs_summary=obs_summary,
@@ -55,7 +82,7 @@ class TournamentCritic(BaseCritic):
         if len(actions) == 1:
             return [(actions[0], 1.0)]
         
-        obs_summary = dp.Observation(state_obs, obs_flags).prompt
+        obs_summary = _get_obs_prompt_cached(state_obs, obs_flags)
         
         # Batch ranking: ask LLM to rank all candidates in one call
         candidates_text = "\n".join(
@@ -106,7 +133,7 @@ Return ONLY the comma-separated indices on the last line."""
 
     def _rank_actions_sequential(self, goal: str, state_obs: Dict[str, Any], actions: List[str], obs_flags: dp.ObsFlags) -> List[tuple[str, float]]:
         """Original sequential tournament ranking fallback."""
-        obs_summary = dp.Observation(state_obs, obs_flags).prompt
+        obs_summary = _get_obs_prompt_cached(state_obs, obs_flags)
         ranked = []
         remaining = list(enumerate(actions))
         

@@ -1,7 +1,9 @@
+import hashlib
 import logging
 import math
 import os
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -173,6 +175,42 @@ class MCTS:
         self.critic = critic or AbsoluteCritic(critique_llm)
         self.selector = selector or MaxVisitSelector()
         self.tree_lock = threading.Lock()
+        self._cache_lock = threading.Lock()
+        self._obs_prompt_cache: dict[str, str] = {}
+        self._terminal_cache: dict[tuple[str, str], bool] = {}
+        self._critic_cache: dict[tuple[str, str, str], float] = {}
+        self._rank_cache: dict[tuple[str, str, tuple[str, ...]], list[tuple[str, float]]] = {}
+        self._timing_enabled = os.environ.get("AGENTQ_MCTS_TIMING") == "1"
+
+    def _log_timing(self, label: str, start_time: float) -> None:
+        if not self._timing_enabled:
+            return
+        elapsed = time.perf_counter() - start_time
+        logger.info("MCTS | Timing | %s: %.3fs", label, elapsed)
+
+    def _obs_cache_key(self, obs: Optional[dict]) -> str:
+        if not obs:
+            return "no_obs"
+        url = obs.get("url", "")
+        titles = obs.get("open_pages_titles", [])
+        title = titles[0] if titles else ""
+        focused = obs.get("focused_element_bid", "")
+        error = obs.get("last_action_error", "")
+        axtree = obs.get("axtree_txt", "")[:2000]
+        pruned_html = obs.get("pruned_html", "")[:2000]
+        raw = "\n".join([url, title, str(focused), str(error), axtree, pruned_html])
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+    def _get_obs_prompt_cached(self, obs: Optional[dict]) -> str:
+        cache_key = self._obs_cache_key(obs)
+        with self._cache_lock:
+            cached = self._obs_prompt_cache.get(cache_key)
+        if cached is not None:
+            return cached
+        prompt = dp.Observation(obs or {}, self.obs_flags).prompt
+        with self._cache_lock:
+            self._obs_prompt_cache[cache_key] = prompt
+        return prompt
 
     def search(
         self,
@@ -202,7 +240,7 @@ class MCTS:
                     datetime.now().strftime("%H:%M:%S"),
                 )
                 try:
-                    self.run_iteration(root, goal, dpo_pairs, None)
+                    self.run_iteration(root, goal, dpo_pairs, None, None)
                 except Exception as e:
                     logger.error(
                         "MCTS | Iteration %s/%s failed: %s | Time: %s",
@@ -213,7 +251,12 @@ class MCTS:
                         exc_info=True,
                     )
         else:
-            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            sim_workers = int(os.environ.get("AGENTQ_MCTS_SIM_WORKERS", str(max_workers)))
+            if sim_workers < 1:
+                sim_workers = 1
+            with ThreadPoolExecutor(max_workers=max_workers) as executor, ThreadPoolExecutor(
+                max_workers=sim_workers
+            ) as sim_executor:
                 # Run iterations in parallel
                 # Note: For small budgets, running them all at once is fine.
                 # Tree updates are protected by tree_lock.
@@ -223,15 +266,43 @@ class MCTS:
                         f"MCTS | Submitting iteration {i+1}/{budget} to thread pool | Time: {datetime.now().strftime('%H:%M:%S')}"
                     )
                     futures.append(
-                        executor.submit(self.run_iteration, root, goal, dpo_pairs, executor)
+                        executor.submit(
+                            self.run_iteration, root, goal, dpo_pairs, executor, sim_executor
+                        )
                     )
 
                 # Wait for all iterations to complete
                 completed = 0
-                timeout = self.iteration_timeout or max(10.0, float(self.action_timeout) * 2.0)
+                if self.iteration_timeout is None:
+                    timeout = None
+                elif self.iteration_timeout <= 0:
+                    timeout = None
+                else:
+                    timeout = float(self.iteration_timeout)
+                heartbeat_interval = float(os.environ.get("AGENTQ_MCTS_HEARTBEAT_SECONDS", "30"))
+                if timeout is None:
+                    logger.warning(
+                        "MCTS | Iteration timeout disabled; long-running iterations may block completion"
+                    )
                 for i, future in enumerate(futures, 1):
                     try:
-                        future.result(timeout=timeout)
+                        if timeout is None:
+                            heartbeat_start = time.perf_counter()
+                            while True:
+                                try:
+                                    future.result(timeout=heartbeat_interval)
+                                    break
+                                except TimeoutError:
+                                    elapsed = time.perf_counter() - heartbeat_start
+                                    logger.info(
+                                        "MCTS | Heartbeat | Iteration %s/%s still running after %.1fs | Time: %s",
+                                        i,
+                                        budget,
+                                        elapsed,
+                                        datetime.now().strftime("%H:%M:%S"),
+                                    )
+                        else:
+                            future.result(timeout=timeout)
                         completed += 1
                         logger.debug(
                             f"MCTS | Iteration {i}/{budget} completed | Time: {datetime.now().strftime('%H:%M:%S')}"
@@ -292,6 +363,7 @@ class MCTS:
         goal: str,
         dpo_pairs: list[dict],
         executor: Optional[ThreadPoolExecutor],
+        sim_executor: Optional[ThreadPoolExecutor],
     ):
         """A single MCTS iteration with proper virtual loss handling."""
         thread_id = threading.current_thread().name
@@ -325,7 +397,8 @@ class MCTS:
 
             if unvisited:
                 # Parallel simulation of children
-                if executor is None:
+                if sim_executor is None:
+                    logger.debug("MCTS | Simulate children sequentially (no sim executor)")
                     for child in unvisited:
                         res_obs, reward = self.simulate(child, goal, self.rollout_depth)
                         with self.tree_lock:
@@ -334,7 +407,11 @@ class MCTS:
                             )
                             self.backpropagate(child, reward)
                 else:
-                    self._simulate_children(unvisited, goal, executor)
+                    logger.debug(
+                        "MCTS | Simulate children in parallel | Children: %s",
+                        len(unvisited),
+                    )
+                    self._simulate_children(unvisited, goal, sim_executor)
                 # Virtual loss cleanup for leaf (children handle their own backprop)
                 with self.tree_lock:
                     leaf.visits -= 1
@@ -387,6 +464,14 @@ class MCTS:
         with self.tree_lock:
             if node.is_terminal is not None:
                 return node.is_terminal
+        obs_key = self._obs_cache_key(node.obs)
+        cache_key = (goal, obs_key)
+        with self._cache_lock:
+            cached = self._terminal_cache.get(cache_key)
+        if cached is not None:
+            with self.tree_lock:
+                node.is_terminal = cached
+            return cached
 
         # Compute outside lock (may involve LLM call)
         result = self._compute_is_terminal(node, goal)
@@ -407,14 +492,20 @@ class MCTS:
         # LLM judge (expensive)
         from agentlab.agents.agentq.prompts import TerminalJudgePrompt
 
-        obs_prompt = dp.Observation(node.obs, self.obs_flags).prompt
+        start_time = time.perf_counter()
+        obs_prompt = self._get_obs_prompt_cached(node.obs)
         judge = TerminalJudgePrompt(
             goal=goal, obs_summary=obs_prompt, screenshot=node.obs.get("screenshot")
         )
 
         try:
             response = self.critique_llm(judge.to_messages())
-            return judge.parse_answer(str(response))
+            result = judge.parse_answer(str(response))
+            self._log_timing("terminal_judge", start_time)
+            obs_key = self._obs_cache_key(node.obs)
+            with self._cache_lock:
+                self._terminal_cache[(goal, obs_key)] = result
+            return result
         except Exception as e:
             logger.warning(f"Terminal judge failed: {e}")
             return False
@@ -471,7 +562,9 @@ class MCTS:
             return
 
         # 1. Generate K candidate actions using the Actor
+        actions_start = time.perf_counter()
         actions = self.generate_candidate_actions(node, goal, n=3, dpo_pairs=dpo_pairs)
+        self._log_timing("action_generation", actions_start)
 
         # Filter empty actions (generate_candidate_actions already validates)
         valid_actions = [a for a in actions if a and a.strip()]
@@ -482,15 +575,37 @@ class MCTS:
         # 2. Rank using critic (tournament or absolute scoring)
         if isinstance(self.critic, TournamentCritic) and len(valid_actions) > 1:
             # Tournament: batch ranking in single LLM call
-            ranked = self.critic.rank_actions_tournament(
-                goal, obs_to_use, valid_actions, self.obs_flags
-            )
+            obs_key = self._obs_cache_key(obs_to_use)
+            rank_key = (goal, obs_key, tuple(valid_actions))
+            with self._cache_lock:
+                cached_ranked = self._rank_cache.get(rank_key)
+            if cached_ranked is not None:
+                ranked = cached_ranked
+            else:
+                rank_start = time.perf_counter()
+                ranked = self.critic.rank_actions_tournament(
+                    goal, obs_to_use, valid_actions, self.obs_flags
+                )
+                self._log_timing("critic_rank_tournament", rank_start)
+                with self._cache_lock:
+                    self._rank_cache[rank_key] = ranked
         else:
             # Absolute scoring: evaluate each action independently
-            ranked = [
-                (action, self.critic.evaluate(goal, action, obs_to_use, self.obs_flags))
-                for action in valid_actions
-            ]
+            obs_key = self._obs_cache_key(obs_to_use)
+            ranked = []
+            for action in valid_actions:
+                cache_key = (goal, obs_key, action)
+                with self._cache_lock:
+                    cached_score = self._critic_cache.get(cache_key)
+                if cached_score is None:
+                    eval_start = time.perf_counter()
+                    cached_score = self.critic.evaluate(
+                        goal, action, obs_to_use, self.obs_flags
+                    )
+                    self._log_timing("critic_eval_absolute", eval_start)
+                    with self._cache_lock:
+                        self._critic_cache[cache_key] = cached_score
+                ranked.append((action, cached_score))
             ranked.sort(key=lambda x: x[1], reverse=True)
 
         # 3. Create children with fast_reward from ranking
@@ -531,7 +646,7 @@ class MCTS:
         )
 
         # Build prompts
-        obs_prompt = dp.Observation(obs_to_use, self.obs_flags).prompt
+        obs_prompt = self._get_obs_prompt_cached(obs_to_use)
         action_prompt = dp.ActionPrompt(self.action_set, self.action_flags)
 
         # DPO context (last 3 pairs)
@@ -560,7 +675,9 @@ function_name('element_id')
 </action>
 """
         try:
+            llm_start = time.perf_counter()
             response = str(self.chat_llm([{"role": "user", "content": prompt}]))
+            self._log_timing("actor_llm", llm_start)
 
             # Parse using agentlab's standard HTML tag extraction
             parsed = extract_html_tags(response, keys=["action"])
@@ -722,6 +839,7 @@ function_name('element_id')
         - True: Sparse environment reward (0/1) from obs metadata (paper-faithful)
         - False: LLM critique score (0.0-1.0) for dense feedback
         """
+        exec_start = time.perf_counter()
         new_obs, error = execute_action_in_fork(
             start_obs=start_obs,
             action=action,
@@ -730,6 +848,7 @@ function_name('element_id')
             headless=self.headless,
             timeout=self.action_timeout,
         )
+        self._log_timing("env_action_execute", exec_start)
 
         if new_obs is None or error:
             logger.warning(f"Action execution failed: {error}")
@@ -741,15 +860,17 @@ function_name('element_id')
             return new_obs, float(env_reward >= 1.0), None
         else:
             # Dense feedback: use LLM critique score
-            pre_obs_summary = dp.Observation(start_obs, self.obs_flags).prompt
+            pre_obs_summary = self._get_obs_prompt_cached(start_obs)
+            critique_start = time.perf_counter()
             critique_result = self.critique(
                 goal,
-                dp.Observation(new_obs, self.obs_flags).prompt,
+                self._get_obs_prompt_cached(new_obs),
                 action,
                 new_obs,
                 pre_obs_summary=pre_obs_summary,
                 action_error=error,
             )
+            self._log_timing("critique_llm", critique_start)
             return new_obs, critique_result.get("score", 0.5), None
 
     def is_terminal_obs(self, obs: dict, goal: str) -> bool:

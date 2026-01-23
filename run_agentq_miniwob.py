@@ -66,14 +66,14 @@ agent_args = AgentQArgs(
     chat_model_args=chat_args,
     flags=flags,
     mcts_budget=3,
-    mcts_max_workers=1,  # Sequential for better debugging
+    mcts_max_workers=2,  # Parallel MCTS iterations for speed
     mcts_rollout_depth=2,
     critic_type="tournament",  # "tournament" | "absolute"
     selection_strategy="max_visit",  # "max_visit" | "ahead_k"
     # ahead_k=1,  # Only used if selection_strategy="ahead_k"
     use_real_rollouts=False,  # False=fast_reward (paper default), True=real browser rollouts
-    sync_mcts=True,
-    iteration_timeout=20.0,
+    sync_mcts=False,
+    iteration_timeout=None,
 )
 
 # 3. Setup Benchmark
