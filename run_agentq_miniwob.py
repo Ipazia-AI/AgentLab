@@ -74,6 +74,9 @@ agent_args = AgentQArgs(
     use_real_rollouts=False,  # False=fast_reward (paper default), True=real browser rollouts
     sync_mcts=False,
     iteration_timeout=None,
+    # Debug/logging toggles
+    mcts_debug_logging=False,  # Enables DEBUG timing/heartbeat logs
+    browser_fork_logging=False,  # Enables browser_forking INFO logs
 )
 
 # 3. Setup Benchmark

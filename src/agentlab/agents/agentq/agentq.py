@@ -39,6 +39,8 @@ class AgentQArgs(GenericAgentArgs):
     timeout_penalty: float = 0.2  # Penalty multiplier for repeated timeouts
     sync_mcts: bool = False  # Run MCTS iterations synchronously (debug-friendly)
     iteration_timeout: float | None = None  # Timeout per MCTS iteration (seconds)
+    mcts_debug_logging: bool = False  # Enable DEBUG logs for MCTS
+    browser_fork_logging: bool = False  # Enable browser_forking INFO logs
 
     def __post_init__(self):
         """Override parent to set correct agent name."""
@@ -66,6 +68,8 @@ class AgentQArgs(GenericAgentArgs):
             timeout_penalty=self.timeout_penalty,
             sync_mcts=self.sync_mcts,
             iteration_timeout=self.iteration_timeout,
+            mcts_debug_logging=self.mcts_debug_logging,
+            browser_fork_logging=self.browser_fork_logging,
         )
 
 
@@ -99,6 +103,8 @@ class AgentQ(GenericAgent):
         timeout_penalty: float = 0.2,
         sync_mcts: bool = False,
         iteration_timeout: float | None = None,
+        mcts_debug_logging: bool = False,
+        browser_fork_logging: bool = False,
     ):
         super().__init__(chat_model_args, flags, max_retry)
         self.mcts_budget = mcts_budget
@@ -112,6 +118,8 @@ class AgentQ(GenericAgent):
         self.timeout_penalty = timeout_penalty
         self.sync_mcts = sync_mcts
         self.iteration_timeout = iteration_timeout
+        self.mcts_debug_logging = mcts_debug_logging
+        self.browser_fork_logging = browser_fork_logging
 
         # Instantiate modular components
         critic = (
@@ -140,7 +148,11 @@ class AgentQ(GenericAgent):
             timeout_penalty=timeout_penalty,
             sync_mcts=sync_mcts,
             iteration_timeout=iteration_timeout,
+            debug_logging=mcts_debug_logging,
         )
+
+        if not browser_fork_logging:
+            logging.getLogger("agentlab.agents.browser_forking").setLevel(logging.WARNING)
 
         # Buffer for in-context DPO learning (preference pairs from tree)
         self.dpo_pairs = []

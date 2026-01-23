@@ -130,6 +130,7 @@ class MCTS:
         timeout_penalty: float = 0.2,
         sync_mcts: bool = False,
         iteration_timeout: Optional[float] = None,
+        debug_logging: bool = False,
     ):
         """
         Initialize MCTS with mixed Q-value support.
@@ -170,6 +171,7 @@ class MCTS:
         self.action_timeouts: dict[str, int] = {}
         self.sync_mcts = sync_mcts
         self.iteration_timeout = iteration_timeout
+        self.debug_logging = debug_logging
 
         # Modular Evaluator/Selector
         self.critic = critic or AbsoluteCritic(critique_llm)
@@ -180,13 +182,15 @@ class MCTS:
         self._terminal_cache: dict[tuple[str, str], bool] = {}
         self._critic_cache: dict[tuple[str, str, str], float] = {}
         self._rank_cache: dict[tuple[str, str, tuple[str, ...]], list[tuple[str, float]]] = {}
-        self._timing_enabled = os.environ.get("AGENTQ_MCTS_TIMING") == "1"
+        self._timing_enabled = os.environ.get("AGENTQ_MCTS_TIMING") == "1" or debug_logging
+        if debug_logging:
+            logging.getLogger(__name__).setLevel(logging.DEBUG)
 
     def _log_timing(self, label: str, start_time: float) -> None:
         if not self._timing_enabled:
             return
         elapsed = time.perf_counter() - start_time
-        logger.info("MCTS | Timing | %s: %.3fs", label, elapsed)
+        logger.debug("MCTS | Timing | %s: %.3fs", label, elapsed)
 
     def _obs_cache_key(self, obs: Optional[dict]) -> str:
         if not obs:
@@ -294,7 +298,7 @@ class MCTS:
                                     break
                                 except TimeoutError:
                                     elapsed = time.perf_counter() - heartbeat_start
-                                    logger.info(
+                                    logger.debug(
                                         "MCTS | Heartbeat | Iteration %s/%s still running after %.1fs | Time: %s",
                                         i,
                                         budget,
