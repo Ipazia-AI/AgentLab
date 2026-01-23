@@ -35,6 +35,9 @@ class AgentQArgs(GenericAgentArgs):
     alpha: float = 0.5  # Q = α*Q̃ + (1-α)*Q̂ | 0=critic only, 1=MCTS only
     q_threshold: float = 0.1  # Min Q-gap for DPO pairs (θ_threshold)
     action_timeout: int = 10  # Timeout per action in seconds
+    timeout_penalty: float = 0.2  # Penalty multiplier for repeated timeouts
+    sync_mcts: bool = False  # Run MCTS iterations synchronously (debug-friendly)
+    iteration_timeout: float | None = None  # Timeout per MCTS iteration (seconds)
     
     def __post_init__(self):
         """Override parent to set correct agent name."""
@@ -59,6 +62,9 @@ class AgentQArgs(GenericAgentArgs):
             alpha=self.alpha,
             q_threshold=self.q_threshold,
             action_timeout=self.action_timeout,
+            timeout_penalty=self.timeout_penalty,
+            sync_mcts=self.sync_mcts,
+            iteration_timeout=self.iteration_timeout,
         )
 
 class AgentQ(GenericAgent):
@@ -88,6 +94,9 @@ class AgentQ(GenericAgent):
         alpha: float = 0.5,
         q_threshold: float = 0.1,
         action_timeout: int = 10,
+        timeout_penalty: float = 0.2,
+        sync_mcts: bool = False,
+        iteration_timeout: float | None = None,
     ):
         super().__init__(chat_model_args, flags, max_retry)
         self.mcts_budget = mcts_budget
@@ -98,6 +107,9 @@ class AgentQ(GenericAgent):
         self.alpha = alpha
         self.q_threshold = q_threshold
         self.action_timeout = action_timeout
+        self.timeout_penalty = timeout_penalty
+        self.sync_mcts = sync_mcts
+        self.iteration_timeout = iteration_timeout
         
         # Instantiate modular components
         critic = TournamentCritic(self.chat_llm) if critic_type == "tournament" else AbsoluteCritic(self.chat_llm)
@@ -117,6 +129,9 @@ class AgentQ(GenericAgent):
             alpha=alpha,
             q_threshold=q_threshold,
             action_timeout=action_timeout,
+            timeout_penalty=timeout_penalty,
+            sync_mcts=sync_mcts,
+            iteration_timeout=iteration_timeout,
         )
         
         # Buffer for in-context DPO learning (preference pairs from tree)

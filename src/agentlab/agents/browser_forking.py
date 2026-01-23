@@ -232,6 +232,7 @@ class BrowserFork:
             return None, "Browser fork not initialized"
         
         error = None
+        start_time = time.time()
         try:
             # Pre-extract for BrowserGym
             bgym_obs._pre_extract(self._page)
@@ -274,8 +275,19 @@ class BrowserFork:
             logger.error(f"Failed to extract observation: {e}")
             if error is None:
                 error = f"Observation extraction failed: {e}"
-        
-        return self._current_obs, error
+            self._current_obs = None
+
+        elapsed = time.time() - start_time
+        if error:
+            logger.info(
+                "Fork action error | action=%s | elapsed=%.2fs | error=%s",
+                action,
+                elapsed,
+                error,
+            )
+            return None, error
+
+        return self._current_obs, None
 
     def _extract_obs(self) -> dict[str, Any]:
         """Extract observation from current page state."""
@@ -344,6 +356,14 @@ def execute_action_in_fork(
         (new_observation, error) tuple
     """
     result_queue = Queue()
+    start_time = time.time()
+    start_url = start_obs.get("url")
+    logger.info(
+        "Fork execute start | url=%s | action=%s | timeout=%ss",
+        start_url,
+        action,
+        timeout,
+    )
     
     def _execute():
         try:
@@ -359,13 +379,37 @@ def execute_action_in_fork(
     thread.join(timeout=timeout)
     
     if thread.is_alive():
-        logger.error(f"Fork execution timed out after {timeout}s")
+        elapsed = time.time() - start_time
+        logger.error(
+            "Fork execution timed out | url=%s | action=%s | elapsed=%.2fs | timeout=%ss",
+            start_url,
+            action,
+            elapsed,
+            timeout,
+        )
         return None, "Timeout"
     
     if result_queue.empty():
         return None, "No result from fork"
-    
-    return result_queue.get()
+
+    obs, error = result_queue.get()
+    elapsed = time.time() - start_time
+    if error:
+        logger.info(
+            "Fork execute error | url=%s | action=%s | elapsed=%.2fs | error=%s",
+            start_url,
+            action,
+            elapsed,
+            error,
+        )
+    else:
+        logger.info(
+            "Fork execute success | url=%s | action=%s | elapsed=%.2fs",
+            start_url,
+            action,
+            elapsed,
+        )
+    return obs, error
 
 
 def execute_rollout_in_fork(
@@ -492,6 +536,15 @@ def browser_fork_and_rollout(
         (first_step_obs, cumulative_reward)
     """
     result_queue = Queue()
+    start_time = time.time()
+    start_url = start_obs.get("url")
+    logger.info(
+        "Fork rollout start | url=%s | action=%s | timeout=%ss | rollout_depth=%s",
+        start_url,
+        initial_action,
+        timeout,
+        rollout_depth,
+    )
     
     def _execute():
         first_obs = None
@@ -566,10 +619,26 @@ def browser_fork_and_rollout(
     thread.join(timeout=timeout)
     
     if thread.is_alive():
-        logger.error(f"Browser fork rollout timed out after {timeout}s")
+        elapsed = time.time() - start_time
+        logger.error(
+            "Fork rollout timed out | url=%s | action=%s | elapsed=%.2fs | timeout=%ss",
+            start_url,
+            initial_action,
+            elapsed,
+            timeout,
+        )
         return None, 0.0
     
     if result_queue.empty():
         return None, 0.0
-    
-    return result_queue.get()
+
+    obs, reward = result_queue.get()
+    elapsed = time.time() - start_time
+    logger.info(
+        "Fork rollout finished | url=%s | action=%s | elapsed=%.2fs | reward=%.3f",
+        start_url,
+        initial_action,
+        elapsed,
+        reward,
+    )
+    return obs, reward

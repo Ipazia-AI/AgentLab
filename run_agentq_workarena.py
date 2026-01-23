@@ -31,10 +31,10 @@ gpt_oss_args = OpenRouterModelArgs(
     model_name="google/gemini-3-flash-preview",
 )
 chat_args = OpenRouterModelArgs(
-    model_name="openai/gpt-5.2",
+    model_name="openai/gpt-5",
 )
 
-chat_args = gpt_oss_args
+# chat_args = gpt_oss_args
 
 # Use standard flags for MiniWob
 flags = GenericPromptFlags(
@@ -77,12 +77,15 @@ agent_args = AgentQArgs(
 )
 
 # 3. Setup Benchmark
-benchmark_name = "miniwob_tiny_test"
+benchmark_name = "workarena_l1"
 benchmark = bgym.DEFAULT_BENCHMARKS[benchmark_name](n_repeats=1)
 
-# Specifically target the first task of miniwob_tiny_test
+# Specifically target the first task of workarena_l1
 try:
-    benchmark = benchmark.subset_from_glob("task_name", "miniwob.click-dialog")
+    benchmark.env_args_list = benchmark.env_args_list[:1]
+    # benchmark = benchmark.subset_from_glob(
+    #     "task_name", "workarena.servicenow.sort-change-request-list"
+    # )
 except (AttributeError, Exception) as e:
     logger.warning(f"Could not filter benchmark: {e}. Running full benchmark if needed.")
 
