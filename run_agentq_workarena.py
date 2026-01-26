@@ -72,8 +72,11 @@ agent_args = AgentQArgs(
     selection_strategy="max_visit",  # "max_visit" | "ahead_k"
     # ahead_k=1,  # Only used if selection_strategy="ahead_k"
     use_real_rollouts=False,  # False=fast_reward (paper default), True=real browser rollouts
-    sync_mcts=True,
-    iteration_timeout=20.0,
+    sync_mcts=False,
+    iteration_timeout=None,
+    # Debug/logging toggles
+    mcts_debug_logging=False,  # Enables DEBUG timing/heartbeat logs
+    browser_fork_logging=False,  # Enables browser_forking INFO logs
 )
 
 # 3. Setup Benchmark
