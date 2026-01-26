@@ -28,7 +28,7 @@ ensure_benchmark("miniwob", project_root=project_root)
 load_dotenv(find_dotenv())
 
 chat_args = OpenRouterModelArgs(
-    model_name="openai/gpt-5.2",
+    model_name="openai/gpt-5-mini",
 )
 
 # Use standard flags for MiniWob
@@ -43,11 +43,11 @@ flags = GenericPromptFlags(
         use_action_history=True,
         use_think_history=True,
         use_diff=False,
-        use_screenshot=True
+        use_screenshot=False
     ),
-    use_abstract_example=True,
-    use_concrete_example=True,
-    enable_chat=False,
+    use_abstract_example=False,
+    use_concrete_example=False,
+    enable_chat=True,
     action=ActionFlags(
         action_set=HighLevelActionSetArgs(
             subsets=["bid", "nav"], # Enable basic interactions and navigation

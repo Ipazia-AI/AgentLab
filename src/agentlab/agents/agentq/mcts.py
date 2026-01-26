@@ -603,17 +603,35 @@ function_name('element_id')
         - True: Sparse environment reward (0/1) from obs metadata (paper-faithful)
         - False: LLM critique score (0.0-1.0) for dense feedback
         """
+        # Use shorter timeout for faster failure detection
+        # Most actions either succeed quickly (<2s) or fail quickly (<2s)
+        # Only navigation actions might take longer
+        effective_timeout = min(self.action_timeout, 5)  # Cap at 5s for fast failures
+        
         new_obs, error = execute_action_in_fork(
             start_obs=start_obs,
             action=action,
             action_set=self.action_set,
             obs_flags=self.obs_flags,
             headless=self.headless,
-            timeout=self.action_timeout
+            timeout=effective_timeout
         )
         
         if new_obs is None or error:
-            logger.warning(f"Action execution failed: {error}")
+            # Categorize errors for better logging
+            if error:
+                error_lower = error.lower()
+                # Expected failures: log at debug level
+                if any(keyword in error_lower for keyword in [
+                    "could not find element",
+                    "execution context was destroyed",
+                    "cannot mark a child frame",
+                    "timeout",
+                    "element is outside"
+                ]):
+                    logger.debug(f"Action execution failed (expected): {action} - {error[:100]}")
+                else:
+                    logger.warning(f"Action execution failed: {action} - {error[:100]}")
             return None, 0.0
         
         if self.use_env_reward:

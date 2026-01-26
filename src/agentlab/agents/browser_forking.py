@@ -155,8 +155,12 @@ class BrowserFork:
         self._context = self._browser.new_context(**context_args)
         # Use shorter timeout for faster failures (5s instead of 30s)
         navigation_timeout = min(self.timeout, 5000)  # Max 5s for navigation
-        self._context.set_default_timeout(navigation_timeout)
+        # Set shorter timeout for element operations (2s) to fail fast on missing elements
+        element_timeout = 2000  # 2s for element lookups/actions
+        self._context.set_default_timeout(element_timeout)
         self._page = self._context.new_page()
+        # Also set timeout on page for consistency
+        self._page.set_default_timeout(element_timeout)
         
         try:
             # Use "domcontentloaded" instead of "networkidle" for much faster navigation
@@ -248,7 +252,21 @@ class BrowserFork:
             
         except Exception as e:
             error = str(e)
-            logger.warning(f"Action execution failed: {error}")
+            # Categorize errors for better handling
+            error_lower = error.lower()
+            
+            # Fast-fail errors: element not found, context destroyed, etc.
+            if any(keyword in error_lower for keyword in [
+                "could not find element",
+                "execution context was destroyed",
+                "cannot mark a child frame without a bid",
+                "timeout",
+                "element is outside of the viewport"  # After retries fail
+            ]):
+                # These are expected failures - log at debug level to reduce noise
+                logger.debug(f"Action execution failed (expected): {error[:200]}")
+            else:
+                logger.warning(f"Action execution failed: {error}")
         
         # Smart waiting: only wait if action might trigger navigation
         # For non-navigation actions (click, fill), minimal wait is sufficient
@@ -268,10 +286,21 @@ class BrowserFork:
                 time.sleep(0.1)
         
         # Extract new observation
+        # Skip extraction if action failed with navigation context error (page may be gone)
+        if error and "execution context was destroyed" in error.lower():
+            # Navigation happened, page context is gone - return parent obs if available
+            logger.debug("Skipping observation extraction after navigation context destruction")
+            return self._current_obs, error
+        
         try:
             self._current_obs = self._extract_obs()
         except Exception as e:
-            logger.error(f"Failed to extract observation: {e}")
+            error_msg = str(e)
+            # Navigation context errors are expected after navigation
+            if "execution context was destroyed" in error_msg.lower():
+                logger.debug(f"Observation extraction failed due to navigation: {e}")
+            else:
+                logger.error(f"Failed to extract observation: {e}")
             if error is None:
                 error = f"Observation extraction failed: {e}"
         
@@ -324,7 +353,7 @@ def execute_action_in_fork(
     action_set: AbstractActionSet,
     obs_flags: Optional[dp.ObsFlags] = None,
     headless: bool = True,
-    timeout: int = 60,
+    timeout: int = 5,  # Reduced default from 60s to 5s for faster failure detection
 ) -> tuple[Optional[dict], Optional[str]]:
     """
     Execute a single action in a forked browser context.
@@ -338,7 +367,7 @@ def execute_action_in_fork(
         action_set: ActionSet for action translation
         obs_flags: Optional observation preprocessing flags
         headless: Run headless
-        timeout: Timeout in seconds
+        timeout: Timeout in seconds (default: 5s for fast failure detection)
         
     Returns:
         (new_observation, error) tuple
@@ -347,7 +376,7 @@ def execute_action_in_fork(
     
     def _execute():
         try:
-            with BrowserFork(start_obs, obs_flags, headless) as fork:
+            with BrowserFork(start_obs, obs_flags, headless, timeout=timeout * 1000) as fork:
                 obs, error = fork.execute(action, action_set)
                 result_queue.put((obs, error))
         except Exception as e:

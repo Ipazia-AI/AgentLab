@@ -59,7 +59,7 @@ def run_amazon_task():
         ),
         use_abstract_example=True,
         use_concrete_example=True,
-        enable_chat=False,
+        enable_chat=True,
         action=ActionFlags(
             action_set=HighLevelActionSetArgs(
                 subsets=["bid", "nav"], # Enable basic interactions and navigation
@@ -74,9 +74,10 @@ def run_amazon_task():
         flags=flags,
         mcts_budget=3,  # Optimized budget for faster verification
         mcts_rollout_depth=2,
-        critic_type="absolute",  # "tournament" | "absolute"
+        critic_type="tournament",  # Changed to "tournament" for batch ranking (1 LLM call vs 3)
         selection_strategy="max_visit",  # "max_visit" | "ahead_k"
         use_real_rollouts=False,  # False=fast_reward (paper default)
+        action_timeout=5,  # Reduced from 10s default for faster failure detection
     )
 
     goal = "Get me the price and the name of the cheapest modern laptop"
