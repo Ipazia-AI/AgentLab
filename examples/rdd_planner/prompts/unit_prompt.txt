@@ -1,0 +1,11 @@
+Solve the following problem:
+
+Problem: {problem}
+
+Current State: {state}
+
+{ancestors}
+
+Provide a clear, specific solution that accomplishes this task. Be concise and actionable.
+
+{examples}
