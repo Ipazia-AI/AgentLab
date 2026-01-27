@@ -498,8 +498,9 @@ class MCTS:
 
         start_time = time.perf_counter()
         obs_prompt = self._get_obs_prompt_cached(node.obs)
+        screenshot = node.obs.get("screenshot") if self.flags.obs.use_screenshot else None
         judge = TerminalJudgePrompt(
-            goal=goal, obs_summary=obs_prompt, screenshot=node.obs.get("screenshot")
+            goal=goal, obs_summary=obs_prompt, screenshot=screenshot
         )
 
         try:

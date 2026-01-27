@@ -48,13 +48,14 @@ class AbsoluteCritic(BaseCritic):
 
     def evaluate(self, goal: str, action: str, current_obs: Dict[str, Any], obs_flags: dp.ObsFlags, pre_obs_summary: Optional[str] = None, action_error: Optional[str] = None) -> float:
         obs_summary = _get_obs_prompt_cached(current_obs, obs_flags)
+        screenshot = current_obs.get("screenshot") if obs_flags.use_screenshot else None
         cp = CritiquePrompt(
             goal=goal,
             obs_summary=obs_summary,
             action=action,
             pre_obs_summary=pre_obs_summary,
             action_error=action_error,
-            screenshot=current_obs.get("screenshot")
+            screenshot=screenshot,
         )
         response = self.llm(cp.to_messages())
         result = cp.parse_answer(str(response))

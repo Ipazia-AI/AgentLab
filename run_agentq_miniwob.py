@@ -28,7 +28,7 @@ ensure_benchmark("miniwob", project_root=project_root)
 load_dotenv(find_dotenv())
 
 gpt_oss_args = OpenRouterModelArgs(
-    model_name="google/gemini-3-flash-preview",
+    model_name="openai/gpt-oss-120b"  # "google/gemini-3-flash-preview",
 )
 chat_args = OpenRouterModelArgs(
     model_name="openai/gpt-5.2",
@@ -48,7 +48,7 @@ flags = GenericPromptFlags(
         use_action_history=True,
         use_think_history=True,
         use_diff=False,
-        use_screenshot=True,
+        use_screenshot=False,
     ),
     use_abstract_example=True,
     use_concrete_example=True,
