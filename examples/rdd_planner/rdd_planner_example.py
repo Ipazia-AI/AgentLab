@@ -7,7 +7,7 @@ Demonstrates recursive task decomposition using an LLM agent.
 
 import sys
 from pathlib import Path
-from dotenv import find_dotenv, load_dotenv
+from dotenv import find_dotenv, load_dotenv  # type: ignore[import-untyped]
 
 sys.path.insert(0, str(Path(__file__).parent))
 
