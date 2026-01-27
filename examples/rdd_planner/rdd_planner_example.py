@@ -121,19 +121,37 @@ def main():
     # print("  4. LLM Agent responses")
     # print("="*80 + "\n")
 
+    def _should_run(prompt: str, *, default_run: bool = True) -> bool:
+        """
+        Return True if user wants to run the example.
+
+        - Enter: run (by default)
+        - Esc or 's'/'skip': skip
+        - Non-interactive stdin (EOF): follow default_run
+        """
+        try:
+            ans = input(prompt)
+        except EOFError:
+            # e.g. when stdin isn't interactive (piped/CI)
+            return default_run
+
+        if ans == "\x1b":
+            return False
+        if ans.strip().lower() in {"s", "skip", "n", "no"}:
+            return False
+        # Empty input => default action (run by default)
+        return default_run
+
     # Run WorkArena example
-    ans = input("Press Enter or Esc to skip WorkArena example, or type anything else to run it: ")
-    if ans.strip() and ans != "\x1b":
+    if _should_run("Press Enter to run WorkArena example (Esc or 's' to skip): "):
         run_workarena_example()
     
     # Run simple example
-    ans = input("\nPress Enter or Esc to skip simple e-commerce example, or type anything else to run it: ")
-    if ans.strip() and ans != "\x1b":
+    if _should_run("\nPress Enter to run simple e-commerce example (Esc or 's' to skip): "):
         run_simple_example()
     
     # Run cooking example
-    ans = input("\nPress Enter or Esc to skip cooking example, or type anything else to run it: ")
-    if ans.strip() and ans != "\x1b":
+    if _should_run("\nPress Enter to run cooking example (Esc or 's' to skip): "):
         run_cooking_example()
 
 
