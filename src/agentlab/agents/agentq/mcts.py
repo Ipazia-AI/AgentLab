@@ -115,9 +115,9 @@ class MCTS:
     def __init__(
         self,
         chat_llm,
-        critique_llm,
         action_set: AbstractActionSet,
         flags: GenericPromptFlags,
+        critique_llm=None,
         headless: bool = True,
         rollout_depth: int = 3,
         critic: Optional[BaseCritic] = None,
@@ -137,9 +137,9 @@ class MCTS:
 
         Args:
             chat_llm: LLM for action generation
-            critique_llm: LLM for critique/evaluation
             action_set: BrowserGym action set
             flags: Prompt flags
+            critique_llm: LLM for critique/evaluation (defaults to chat_llm)
             headless: Run browser in headless mode
             rollout_depth: Depth of rollout simulations
             critic: Critic for action evaluation (default: AbsoluteCritic)
@@ -155,7 +155,7 @@ class MCTS:
             action_timeout: Timeout in seconds for single action execution (default: 10).
         """
         self.chat_llm = chat_llm
-        self.critique_llm = critique_llm
+        self.critique_llm = critique_llm or chat_llm
         self.action_set = action_set
         self.flags = flags
         self.action_flags = flags.action
@@ -174,7 +174,7 @@ class MCTS:
         self.debug_logging = debug_logging
 
         # Modular Evaluator/Selector
-        self.critic = critic or AbsoluteCritic(critique_llm)
+        self.critic = critic or AbsoluteCritic(self.critique_llm)
         self.selector = selector or MaxVisitSelector()
         self.tree_lock = threading.Lock()
         self._cache_lock = threading.Lock()
@@ -191,6 +191,19 @@ class MCTS:
             return
         elapsed = time.perf_counter() - start_time
         logger.debug("MCTS | Timing | %s: %.3fs", label, elapsed)
+
+    def _call_critique_llm(self, messages, purpose: str):
+        try:
+            return self.critique_llm(messages)
+        except Exception as e:
+            if self.critique_llm is self.chat_llm:
+                raise
+            logger.warning(
+                "Critique LLM failed during %s: %s. Falling back to chat model.",
+                purpose,
+                e,
+            )
+            return self.chat_llm(messages)
 
     def _obs_cache_key(self, obs: Optional[dict]) -> str:
         if not obs:
@@ -504,7 +517,7 @@ class MCTS:
         )
 
         try:
-            response = self.critique_llm(judge.to_messages())
+            response = self._call_critique_llm(judge.to_messages(), "terminal_judge")
             result = judge.parse_answer(str(response))
             self._log_timing("terminal_judge", start_time)
             obs_key = self._obs_cache_key(node.obs)
@@ -897,6 +910,15 @@ function_name('element_id')
             return {"score": score, "reasoning": "Modular Critic evaluation"}
         except Exception as e:
             logger.warning(f"Modular Critique failed: {e}")
+            if self.critique_llm is not self.chat_llm:
+                try:
+                    fallback = AbsoluteCritic(self.chat_llm)
+                    score = fallback.evaluate(
+                        goal, action, obs, self.obs_flags, pre_obs_summary, action_error
+                    )
+                    return {"score": score, "reasoning": "Fallback chat critic evaluation"}
+                except Exception as fallback_error:
+                    logger.warning(f"Fallback Critique failed: {fallback_error}")
             return {"score": 0.5, "reasoning": f"Critique failed: {e}"}
 
     def backpropagate(self, node: MCTSNode, reward: float):

@@ -36,6 +36,12 @@ chat_args = OpenRouterModelArgs(
 
 chat_args = gpt_oss_args
 
+# Optional: use a different model for critique/judge
+critique_args = None
+critique_args = OpenRouterModelArgs(
+    model_name="openai/gpt-5.2",
+)
+
 # Use standard flags for MiniWob
 flags = GenericPromptFlags(
     obs=ObsFlags(
@@ -64,6 +70,7 @@ flags = GenericPromptFlags(
 
 agent_args = AgentQArgs(
     chat_model_args=chat_args,
+    critique_model_args=critique_args,
     flags=flags,
     mcts_budget=3,
     mcts_max_workers=2,  # Parallel MCTS iterations for speed

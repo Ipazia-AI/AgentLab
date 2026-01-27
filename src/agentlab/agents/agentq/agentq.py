@@ -24,6 +24,7 @@ class AgentQArgs(GenericAgentArgs):
     AgentQ configuration with mixed Q-value support (Agent Q paper Eq. 10).
     """
 
+    critique_model_args: BaseModelArgs | None = None
     mcts_budget: int = 5
     mcts_max_workers: int = 4
     mcts_rollout_depth: int = 3
@@ -52,6 +53,7 @@ class AgentQArgs(GenericAgentArgs):
     def make_agent(self):
         return AgentQ(
             chat_model_args=self.chat_model_args,
+            critique_model_args=self.critique_model_args,
             flags=self.flags,
             max_retry=self.max_retry,
             mcts_budget=self.mcts_budget,
@@ -72,6 +74,16 @@ class AgentQArgs(GenericAgentArgs):
             browser_fork_logging=self.browser_fork_logging,
         )
 
+    def prepare(self):
+        self.chat_model_args.prepare_server()
+        if self.critique_model_args:
+            self.critique_model_args.prepare_server()
+
+    def close(self):
+        self.chat_model_args.close_server()
+        if self.critique_model_args:
+            self.critique_model_args.close_server()
+
 
 class AgentQ(GenericAgent):
     """
@@ -87,6 +99,7 @@ class AgentQ(GenericAgent):
     def __init__(
         self,
         chat_model_args: BaseModelArgs,
+        critique_model_args: BaseModelArgs | None,
         flags: GenericPromptFlags,
         max_retry: int = 4,
         mcts_budget: int = 5,
@@ -107,6 +120,9 @@ class AgentQ(GenericAgent):
         browser_fork_logging: bool = False,
     ):
         super().__init__(chat_model_args, flags, max_retry)
+        self.critique_llm = (
+            critique_model_args.make_model() if critique_model_args else None
+        )
         self.mcts_budget = mcts_budget
         self.mcts_max_workers = mcts_max_workers
         self.mcts_rollout_depth = mcts_rollout_depth
@@ -134,7 +150,7 @@ class AgentQ(GenericAgent):
         # Initialize MCTS engine
         self.mcts = MCTS(
             chat_llm=self.chat_llm,
-            critique_llm=self.chat_llm,
+            critique_llm=self.critique_llm,
             action_set=self.action_set,
             flags=self.flags,
             rollout_depth=self.mcts_rollout_depth,
