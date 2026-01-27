@@ -31,10 +31,10 @@ gpt_oss_args = OpenRouterModelArgs(
     model_name="google/gemini-3-flash-preview",
 )
 chat_args = OpenRouterModelArgs(
-    model_name="openai/gpt-5-mini",
+    model_name="openai/gpt-5",
 )
 
-chat_args = gpt_oss_args
+# chat_args = gpt_oss_args
 
 # Use standard flags for MiniWob
 flags = GenericPromptFlags(
@@ -48,11 +48,11 @@ flags = GenericPromptFlags(
         use_action_history=True,
         use_think_history=True,
         use_diff=False,
-        use_screenshot=False,
+        use_screenshot=True,
     ),
-    use_abstract_example=False,
-    use_concrete_example=False,
-    enable_chat=True,
+    use_abstract_example=True,
+    use_concrete_example=True,
+    enable_chat=False,
     action=ActionFlags(
         action_set=HighLevelActionSetArgs(
             subsets=["bid", "nav"],  # Enable basic interactions and navigation
@@ -66,7 +66,7 @@ agent_args = AgentQArgs(
     chat_model_args=chat_args,
     flags=flags,
     mcts_budget=3,
-    mcts_max_workers=2,  # Parallel MCTS iterations for speed
+    mcts_max_workers=1,  # Sequential for better debugging
     mcts_rollout_depth=2,
     critic_type="tournament",  # "tournament" | "absolute"
     selection_strategy="max_visit",  # "max_visit" | "ahead_k"
@@ -80,12 +80,15 @@ agent_args = AgentQArgs(
 )
 
 # 3. Setup Benchmark
-benchmark_name = "miniwob_tiny_test"
+benchmark_name = "workarena_l1"
 benchmark = bgym.DEFAULT_BENCHMARKS[benchmark_name](n_repeats=1)
 
-# Specifically target the first task of miniwob_tiny_test
+# Specifically target the first task of workarena_l1
 try:
-    benchmark = benchmark.subset_from_glob("task_name", "miniwob.click-dialog")
+    benchmark.env_args_list = benchmark.env_args_list[:1]
+    # benchmark = benchmark.subset_from_glob(
+    #     "task_name", "workarena.servicenow.sort-change-request-list"
+    # )
 except (AttributeError, Exception) as e:
     logger.warning(f"Could not filter benchmark: {e}. Running full benchmark if needed.")
 
