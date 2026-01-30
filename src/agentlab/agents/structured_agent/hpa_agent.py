@@ -1,0 +1,111 @@
+from dataclasses import dataclass
+from typing import Any
+
+import bgym  # type: ignore[import-not-found]
+
+from agentlab.agents.agent_args import AgentArgs
+from agentlab.agents.dynamic_prompting import ObsFlags, make_obs_preprocessor
+from agentlab.llm.base_api import BaseModelArgs
+
+from .andor_tree import Node, NodeType
+from .hpa import HPA
+
+
+@dataclass
+class HPAAgentArgs(AgentArgs):
+    chat_model_args: BaseModelArgs | None = None
+    goal_text: str = "Solve task"
+    budget: int = 1000
+    max_revision_count: int = 3
+    action_subsets: tuple[str, ...] = ("workarena",)
+    multiaction: bool = False
+
+    def __post_init__(self):
+        if self.chat_model_args is not None:
+            self.agent_name = f"HPAAgent-{self.chat_model_args.model_name}".replace("/", "_")
+        else:
+            self.agent_name = "HPAAgent"
+
+    def make_agent(self) -> bgym.Agent:
+        return HPAAgent(
+            chat_model_args=self.chat_model_args,
+            goal_text=self.goal_text,
+            budget=self.budget,
+            max_revision_count=self.max_revision_count,
+            action_subsets=self.action_subsets,
+            multiaction=self.multiaction,
+        )
+
+    def prepare(self):
+        if self.chat_model_args is not None:
+            return self.chat_model_args.prepare_server()
+        return None
+
+    def close(self):
+        if self.chat_model_args is not None:
+            return self.chat_model_args.close_server()
+        return None
+
+
+class HPAAgent(bgym.Agent):
+    def __init__(
+        self,
+        chat_model_args: BaseModelArgs | None,
+        goal_text: str,
+        budget: int,
+        max_revision_count: int,
+        action_subsets: tuple[str, ...],
+        multiaction: bool,
+    ):
+        self.chat_llm = chat_model_args.make_model() if chat_model_args is not None else None
+        self.action_set: bgym.AbstractActionSet = bgym.HighLevelActionSet(
+            action_subsets, multiaction=multiaction
+        )
+
+        self._obs_preprocessor = make_obs_preprocessor(ObsFlags())
+
+        self.hpa = HPA(
+            chat_llm=self.chat_llm,
+            action_set=self.action_set,
+            budget=budget,
+            max_revision_count=max_revision_count,
+        )
+        self.goal_text = goal_text
+        self.root_node = Node(type=NodeType.UNKNOWN, text=self.goal_text)
+        self.hpa.reset(self.root_node, goal=self.goal_text)
+        self.pending_action_node: Node | None = None
+
+    def obs_preprocessor(self, obs: dict) -> dict:
+        return self._obs_preprocessor(obs)
+
+    def reset(self, seed=None):
+        self.root_node = Node(type=NodeType.UNKNOWN, text=self.goal_text)
+        self.hpa.reset(self.root_node, goal=self.goal_text)
+        self.pending_action_node = None
+
+    def get_action(self, obs: Any) -> tuple[str | None, dict]:
+        if self.pending_action_node is not None and isinstance(obs, dict):
+            success = "axtree_txt" in obs and obs.get("axtree_txt") is not None
+            self.hpa.finalize_action(self.pending_action_node, obs, success)
+            self.pending_action_node = None
+
+        action_node = self.hpa.run_until_action()
+        action = None
+        if action_node is not None:
+            action = action_node.text
+            self.pending_action_node = action_node
+
+        agent_info = {
+            "stats": {},
+            "hpa": {
+                "pending_node_id": str(self.pending_action_node.id)
+                if self.pending_action_node
+                else None,
+                "pending_node_type": self.pending_action_node.type.name
+                if self.pending_action_node
+                else None,
+                "root_status": self.root_node.status.name,
+                "stack_depth": len(self.hpa.stack),
+            },
+        }
+        return action, agent_info
