@@ -1,6 +1,6 @@
 from collections.abc import Callable
 from enum import Enum, auto
-from typing import Any, Literal, Protocol
+from typing import Any, Literal, Protocol, Optional
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field
@@ -34,10 +34,10 @@ class Node(BaseModel):
     status: NodeStatus = NodeStatus.UNVISITED
     text: str
 
-    parent: "Node" | None = None
+    parent: Optional["Node"] = None
     children: list["Node"] = Field(default_factory=list)
 
-    score: float | None = None
+    score: Optional[float] = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     revision_count: int = 0

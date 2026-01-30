@@ -67,9 +67,9 @@ class HPA:
         self._set_context(node)
         node.execution_count += 1
 
-        if node.type == NodeType.UNKNOWN:
-            node.type = self._populate_node_type(node, goal)
-            self.stack.append((node, NodeState.EXITING))
+        if node.status == NodeStatus.UNVISITED:
+            node.type = self._expand_node(node, goal)
+            #self.stack.append((node, NodeState.EXITING))
 
         if node.type == NodeType.ACTION:
             self.stack.append((node, NodeState.EXITING))
@@ -160,7 +160,7 @@ class HPA:
                 self._synchronize_stack()
                 self._propagate_failure(node)
 
-    def _populate_node_type(self, node: Node, goal: str | None) -> NodeType:
+    def _expand_node(self, node: Node, goal: str | None) -> NodeType:
         return NodeType.ACTION
 
     def _select_promising_child(self, node: Node) -> Node:
