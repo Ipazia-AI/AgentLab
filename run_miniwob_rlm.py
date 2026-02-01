@@ -4,7 +4,8 @@ Based on run_miniwob_agentq.py but specialized for RLMGenericAgent.
 
 The RLM agent externalizes browser observations (AXTree, HTML) to a sandboxed
 REPL environment, allowing the LLM to programmatically explore large contexts
-instead of stuffing them into the prompt.
+instead of stuffing them into the prompt. Screenshots are kept in the prompt
+for vision models.
 """
 
 import logging
@@ -30,32 +31,35 @@ project_root = Path(__file__).resolve().parent
 ensure_benchmark("miniwob", project_root=project_root)
 load_dotenv(find_dotenv())
 
-# Primary model for main RLM loop
+# Primary model for main RLM loop (vision-capable for screenshots)
 main_model_args = OpenRouterModelArgs(
     model_name="google/gemini-2.0-flash-001",
+    vision_support=True,  # Enable vision for screenshot support
 )
 
 # Optional: cheaper/faster model for recursive_llm calls (sub-queries)
-# Set to None to use the same model for recursive calls
 recursive_model_args = OpenRouterModelArgs(
     model_name="google/gemini-2.0-flash-001",
+    vision_support=False,  # Recursive calls are text-only
 )
 
 # Use RLM-specific flags
-# Note: RLM doesn't use history/think in the traditional way since it 
-# externalizes context to REPL. We still enable ax_tree and html for the context.
+# RLM externalizes DOM/AXTree to REPL, but keeps screenshots in prompt
 flags = RLMPromptFlags(
     obs=ObsFlags(
         use_html=True,  # Include HTML in REPL context
         use_ax_tree=True,  # Include AXTree in REPL context
         use_focused_element=True,
         use_error_logs=True,
-        use_history=False,  # RLM handles history differently (in REPL context)
+        use_history=False,  # RLM handles history in REPL context
         use_past_error_logs=True,
         use_action_history=False,  # RLM handles this in REPL context
         use_think_history=False,
         use_diff=False,
-        use_screenshot=False,
+        # Screenshot settings - kept in prompt for vision models
+        use_screenshot=True,  # Enable screenshot in prompt
+        use_som=False,  # Set to True for annotated screenshots with bids
+        openai_vision_detail="auto",  # "low", "high", or "auto"
     ),
     action=ActionFlags(
         action_set=HighLevelActionSetArgs(

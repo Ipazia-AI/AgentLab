@@ -5,6 +5,8 @@ This module implements an agent that uses the Recursive Language Model (RLM) par
 instead of stuffing the full DOM/AXTree into the prompt, it externalizes the observation
 to a REPL environment where the model can programmatically explore it.
 
+Screenshots are kept in the prompt for vision models (not externalized to REPL).
+
 Based on the RLM paper: https://arxiv.org/abs/2512.24601
 """
 
@@ -13,6 +15,7 @@ import re as regex_module
 from copy import deepcopy
 from dataclasses import asdict, dataclass
 from typing import Any
+from warnings import warn
 
 from bgym import Benchmark
 from browsergym.experiments.agent import Agent, AgentInfo
@@ -20,7 +23,7 @@ from browsergym.experiments.agent import Agent, AgentInfo
 from agentlab.agents import dynamic_prompting as dp
 from agentlab.agents.agent_args import AgentArgs
 from agentlab.llm.chat_api import BaseModelArgs
-from agentlab.llm.llm_utils import Discussion, ParseError, SystemMessage, HumanMessage
+from agentlab.llm.llm_utils import Discussion, ParseError, SystemMessage, HumanMessage, image_to_jpg_base64_url
 from agentlab.llm.tracking import cost_tracker_decorator
 
 from .rlm_repl import REPLExecutor, REPLError
@@ -106,9 +109,10 @@ class RLMGenericAgent(Agent):
     RLM-based agent for web automation.
     
     Instead of putting the full observation in the prompt, this agent:
-    1. Externalizes the observation to a REPL environment
-    2. Lets the model write code to explore the observation
-    3. Iterates until the model produces a FINAL() action
+    1. Externalizes the observation to a REPL environment (DOM, AXTree, etc.)
+    2. Keeps screenshots in the prompt for vision models
+    3. Lets the model write code to explore the text observation
+    4. Iterates until the model produces a FINAL() action
     """
 
     def __init__(
@@ -128,6 +132,7 @@ class RLMGenericAgent(Agent):
         self.max_depth = max_depth
 
         self.flags = flags
+        self._check_flag_constancy()
         self.action_set = self.flags.action.action_set.make_action_set()
         self._obs_preprocessor = dp.make_obs_preprocessor(flags.obs)
 
@@ -135,6 +140,22 @@ class RLMGenericAgent(Agent):
         self.repl = REPLExecutor(max_output_chars=4000)
 
         self.reset(seed=None)
+
+    def _check_flag_constancy(self):
+        """Check and fix flag consistency, especially for vision support."""
+        flags = self.flags
+        if flags.obs.use_som:
+            if not flags.obs.use_screenshot:
+                warn("use_som=True requires use_screenshot=True. Disabling use_som.")
+                flags.obs.use_som = False
+        if flags.obs.use_screenshot:
+            if not self.chat_model_args.vision_support:
+                warn(
+                    "use_screenshot is set to True, but the chat model "
+                    "does not support vision. Disabling use_screenshot."
+                )
+                flags.obs.use_screenshot = False
+        return flags
 
     def obs_preprocessor(self, obs: dict) -> dict:
         return self._obs_preprocessor(obs)
@@ -175,15 +196,20 @@ class RLMGenericAgent(Agent):
             context_info=context_info,
             action_set_description=action_set_description,
             depth=0,
+            has_screenshot=self.flags.obs.use_screenshot,
         )
         system_prompt = SystemMessage(system_prompt_text)
         
         # Build initial user prompt
         goal = self._extract_goal(obs)
-        user_prompt_text = build_user_prompt(goal, iteration=0)
+        user_prompt_text = build_user_prompt(goal, iteration=0, has_screenshot=self.flags.obs.use_screenshot)
+        
+        # Create user message and add screenshot if enabled
+        user_message = HumanMessage(user_prompt_text)
+        self._add_screenshot_to_message(user_message, obs)
         
         # Initialize conversation
-        messages = Discussion([system_prompt, HumanMessage(user_prompt_text)])
+        messages = Discussion([system_prompt, user_message])
         
         # RLM iteration loop
         final_action = None
@@ -287,6 +313,9 @@ class RLMGenericAgent(Agent):
         """
         Build the context dict that will be available in the REPL.
         
+        Includes both text representations and structured objects for
+        programmatic exploration.
+        
         Args:
             obs: Observation dict
             
@@ -294,13 +323,23 @@ class RLMGenericAgent(Agent):
             Context dict for REPL
         """
         context = {
+            # Text representations (searchable with regex)
             'axtree': obs.get('axtree_txt', ''),
-            'html': obs.get('pruned_html', obs.get('dom_txt', '')),
+            'html': obs.get('pruned_html', ''),
+            'dom_full': obs.get('dom_txt', ''),  # Full DOM, not pruned
             'url': obs.get('url', ''),
             'tabs': self._format_tabs(obs),
             'error': obs.get('last_action_error', ''),
             'goal': self._extract_goal(obs),
             'action_history': [str(a) for a in self.actions if a],
+            
+            # Element info
+            'focused_element': obs.get('focused_element_bid', ''),
+            
+            # Structured objects (for programmatic traversal)
+            'dom_object': obs.get('dom_object', {}),
+            'axtree_object': obs.get('axtree_object', {}),
+            'extra_properties': obs.get('extra_element_properties', {}),
         }
         return context
 
@@ -421,3 +460,39 @@ Provide a concise answer."""
             raise ParseError(f"Invalid action: {e}")
         
         return action
+
+    def _add_screenshot_to_message(self, message: HumanMessage, obs: dict) -> HumanMessage:
+        """
+        Add screenshot to a message if screenshot mode is enabled.
+        
+        Screenshots are kept in the prompt (not externalized to REPL) because:
+        1. They provide essential visual grounding for the model
+        2. They can't be meaningfully searched with Python code
+        3. Vision models need direct access to images
+        
+        Args:
+            message: The HumanMessage to add screenshot to
+            obs: Observation dict containing screenshot
+            
+        Returns:
+            The message with screenshot added (if enabled)
+        """
+        if not self.flags.obs.use_screenshot:
+            return message
+        
+        # Get the appropriate screenshot (with or without SoM annotations)
+        if self.flags.obs.use_som:
+            screenshot = obs.get("screenshot_som")
+            message.add_text(
+                "\n## Screenshot:\nHere is a screenshot of the page, annotated with bounding boxes and bids:"
+            )
+        else:
+            screenshot = obs.get("screenshot")
+            message.add_text("\n## Screenshot:\nHere is a screenshot of the page:")
+        
+        if screenshot is not None:
+            img_url = image_to_jpg_base64_url(screenshot)
+            detail = getattr(self.flags.obs, 'openai_vision_detail', 'auto')
+            message.add_image(img_url, detail=detail)
+        
+        return message
