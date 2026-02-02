@@ -18,6 +18,12 @@ from agentlab.llm.rlm_chat_model import (
     RLMModelArgs,
 )
 from agentlab.llm.rlm_parser import extract_final, extract_final_var, is_final, parse_response
+from agentlab.llm.rlm_prompt_parser import (
+    ParsedPrompt,
+    build_context_dict,
+    get_context_info,
+    parse_agent_prompt,
+)
 from agentlab.llm.rlm_prompts import build_system_prompt
 from agentlab.llm.rlm_repl import REPLError, REPLExecutor
 
@@ -77,37 +83,37 @@ class TestREPLExecutor:
     def test_simple_print(self):
         """Test basic print statement execution."""
         repl = REPLExecutor()
-        env = {"context": "hello world", "query": "test"}
-        result = repl.execute("print(context)", env)
+        env = {"context": {"axtree": "hello world"}, "query": "test"}
+        result = repl.execute("```python\nprint(context['axtree'])\n```", env)
         assert "hello world" in result
 
     def test_context_slicing(self):
         """Test slicing context variable."""
         repl = REPLExecutor()
-        env = {"context": "hello world", "query": "test"}
-        result = repl.execute("print(context[:5])", env)
+        env = {"context": {"axtree": "hello world"}, "query": "test"}
+        result = repl.execute("```python\nprint(context['axtree'][:5])\n```", env)
         assert "hello" in result
 
     def test_regex_search(self):
         """Test regex operations on context."""
         import re as re_module
         repl = REPLExecutor()
-        env = {"context": "The answer is 42.", "query": "find number", "re": re_module}
+        env = {"context": {"axtree": "The answer is 42."}, "query": "find number", "re": re_module}
         # Note: 're' is pre-imported in the REPL environment, no need to import it
-        result = repl.execute("print(re.findall(r'\\d+', context))", env)
+        result = repl.execute("```python\nprint(re.findall(r'\\d+', context['axtree']))\n```", env)
         assert "42" in result
 
     def test_expression_evaluation(self):
         """Test that last expression value is returned."""
         repl = REPLExecutor()
-        env = {"context": "test", "query": "test"}
-        result = repl.execute("len(context)", env)
+        env = {"context": {"axtree": "test"}, "query": "test"}
+        result = repl.execute("```python\nlen(context['axtree'])\n```", env)
         assert "4" in result
 
     def test_code_block_extraction(self):
         """Test extraction of code from markdown blocks."""
         repl = REPLExecutor()
-        env = {"context": "test", "query": "test"}
+        env = {"context": {"axtree": "test"}, "query": "test"}
 
         code_with_block = """
 ```python
@@ -120,16 +126,16 @@ print("hello")
     def test_output_truncation(self):
         """Test that long output is truncated."""
         repl = REPLExecutor(max_output_chars=50)
-        env = {"context": "x" * 1000, "query": "test"}
-        result = repl.execute("print(context)", env)
+        env = {"context": {"axtree": "x" * 1000}, "query": "test"}
+        result = repl.execute("```python\nprint(context['axtree'])\n```", env)
         assert "truncated" in result.lower()
 
     def test_compilation_error(self):
         """Test that syntax errors are caught."""
         repl = REPLExecutor()
-        env = {"context": "test", "query": "test"}
+        env = {"context": {"axtree": "test"}, "query": "test"}
         with pytest.raises(REPLError) as exc_info:
-            repl.execute("def incomplete(", env)
+            repl.execute("```python\ndef incomplete(\n```", env)
         assert "error" in str(exc_info.value).lower()
 
     def test_no_file_access(self):
@@ -137,7 +143,52 @@ print("hello")
         repl = REPLExecutor()
         env = {"context": "test", "query": "test"}
         with pytest.raises(REPLError):
-            repl.execute("open('/etc/passwd')", env)
+            repl.execute("```python\nopen('/etc/passwd')\n```", env)
+
+    def test_raw_text_not_executed(self):
+        """Test that raw text without code blocks is NOT executed."""
+        repl = REPLExecutor()
+        env = {"context": {"axtree": "test", "html": "test"}, "query": "test"}
+
+        # This raw text should NOT be executed as code
+        result = repl.execute("click('20')", env)
+        assert "No code block found" in result
+
+        # Also test partial action-like text
+        result = repl.execute("I'll click the button with bid 20", env)
+        assert "No code block found" in result
+
+    def test_dict_context_access(self):
+        """Test that dict context can be accessed in code."""
+        repl = REPLExecutor()
+        env = {
+            "context": {
+                "axtree": "RootWebArea\n  [20] button 'Close'",
+                "html": "<button bid='20'>Close</button>",
+                "goal": "Close the dialog",
+            },
+            "query": "test",
+        }
+
+        result = repl.execute("```python\nprint(context['axtree'])\n```", env)
+        assert "button" in result
+        assert "Close" in result
+
+    def test_dict_context_keys(self):
+        """Test listing dict context keys."""
+        repl = REPLExecutor()
+        env = {
+            "context": {
+                "axtree": "tree",
+                "html": "html",
+                "goal": "goal",
+            },
+            "query": "test",
+        }
+
+        result = repl.execute("```python\nprint(list(context.keys()))\n```", env)
+        assert "axtree" in result
+        assert "html" in result
 
 
 # ==============================================================================
@@ -209,16 +260,166 @@ class TestPrompts:
 
     def test_system_prompt_contains_essentials(self):
         """Test that system prompt contains required elements."""
-        prompt = build_system_prompt(context_size=10000, depth=0)
+        context_info = {"axtree": 5000, "html": 10000}
+        action_format = "click(bid: str) - Click an element"
+        prompt = build_system_prompt(context_info=context_info, action_format=action_format, depth=0)
+
         assert "context" in prompt.lower()
         assert "FINAL" in prompt
-        assert "REPL" in prompt or "Python" in prompt
-        assert "10,000" in prompt  # Formatted context size
+        assert "python" in prompt.lower()
+        assert "axtree" in prompt.lower()
+        assert "<action>" in prompt  # Action tags are explained
+        assert "click" in prompt  # Action format is included
 
     def test_system_prompt_depth(self):
         """Test that depth is included in prompt."""
-        prompt = build_system_prompt(context_size=100, depth=2)
+        prompt = build_system_prompt(context_info={"axtree": 100}, action_format="", depth=2)
         assert "2" in prompt
+
+    def test_system_prompt_context_keys(self):
+        """Test that context keys and sizes are listed."""
+        context_info = {"axtree": 1234, "html": 5678, "history": 999}
+        prompt = build_system_prompt(context_info=context_info, action_format="", depth=0)
+
+        assert "axtree" in prompt
+        assert "html" in prompt
+        assert "history" in prompt
+        assert "1,234" in prompt  # Formatted size
+
+
+# ==============================================================================
+# Prompt Parser Tests
+# ==============================================================================
+
+
+class TestPromptParser:
+    """Tests for the GenericAgent prompt parser."""
+
+    def test_parse_simple_task(self):
+        """Test parsing a simple task from chat messages."""
+        messages = [
+            {"role": "system", "content": "You are a web assistant."},
+            {
+                "role": "user",
+                "content": """## Chat messages:
+
+ - [user] UTC Time: Mon Feb 2 14:00:00 2026 - Close the dialog by clicking the "x".
+
+# Observation of current step:
+
+## AXTree:
+RootWebArea 'Test'
+    [20] button 'Close'
+
+## HTML:
+<button bid="20">Close</button>
+
+# Action space:
+click(bid: str) - Click an element.
+""",
+            },
+        ]
+        parsed = parse_agent_prompt(messages)
+
+        assert 'Close the dialog by clicking the "x"' in parsed.task
+        assert "button" in parsed.axtree
+        assert "<button" in parsed.html
+        assert "click" in parsed.action_format
+
+    def test_parse_with_history(self):
+        """Test parsing prompt with history section."""
+        messages = [
+            {
+                "role": "user",
+                "content": """## Chat messages:
+ - [user] 2026-02-02 - Do the task.
+
+# History of interaction with the task:
+Step 1: Clicked button 1
+Step 2: Filled form
+
+# Observation of current step:
+
+## AXTree:
+[10] input 'Name'
+
+# Action space:
+fill(bid, text) - Fill a form field.
+""",
+            },
+        ]
+        parsed = parse_agent_prompt(messages)
+
+        assert "Clicked button" in parsed.history
+        assert "Filled form" in parsed.history
+
+    def test_parse_multimodal(self):
+        """Test parsing messages with images."""
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "## Chat messages:\n - [user] Click the red button.\n\n## AXTree:\n[1] button 'Red'"},
+                    {"type": "image_url", "image_url": {"url": "data:image/png;base64,abc123"}},
+                ],
+            },
+        ]
+        parsed = parse_agent_prompt(messages)
+
+        assert "Click the red button" in parsed.task
+        assert len(parsed.images) == 1
+        assert parsed.images[0]["type"] == "image_url"
+
+    def test_build_context_dict(self):
+        """Test building context dict from parsed prompt."""
+        parsed = ParsedPrompt(
+            task="Click the button",
+            axtree="[20] button 'Submit'",
+            html="<button>Submit</button>",
+            history="Step 1: Opened page",
+            error="Previous click failed",
+        )
+
+        context = build_context_dict(parsed)
+
+        assert context["axtree"] == "[20] button 'Submit'"
+        assert context["html"] == "<button>Submit</button>"
+        assert context["goal"] == "Click the button"
+        assert context["history"] == "Step 1: Opened page"
+        assert context["error"] == "Previous click failed"
+
+    def test_get_context_info(self):
+        """Test getting context size information."""
+        parsed = ParsedPrompt(
+            axtree="x" * 1000,
+            html="y" * 500,
+            history="",  # Empty should not appear
+        )
+
+        info = get_context_info(parsed)
+
+        assert info["axtree"] == 1000
+        assert info["html"] == 500
+        assert "history" not in info  # Empty strings excluded
+
+    def test_parse_goal_section(self):
+        """Test parsing non-chat mode with Goal section."""
+        messages = [
+            {
+                "role": "user",
+                "content": """## Goal:
+Navigate to the settings page.
+
+# Observation of current step:
+
+## AXTree:
+[5] link 'Settings'
+""",
+            },
+        ]
+        parsed = parse_agent_prompt(messages)
+
+        assert "Navigate to the settings page" in parsed.task
 
 
 # ==============================================================================
@@ -243,24 +444,34 @@ class TestRLMChatModel:
     def test_iterative_exploration(self):
         """Test that RLM iterates through REPL execution."""
         responses = [
-            "print(context[:10])",  # First: explore context
-            'FINAL("found it")',  # Second: provide answer
+            "```python\nprint(context['axtree'][:10])\n```",  # First: explore context
+            'FINAL("<action>click(\'20\')</action>")',  # Second: provide answer
         ]
         mock = MockChatModel(responses)
         rlm = RLMChatModel(inner_model=mock, max_iterations=5)
 
-        messages = [{"role": "user", "content": "Find something in: hello world"}]
+        messages = [
+            {
+                "role": "user",
+                "content": """## Chat messages:
+ - [user] Find something
+
+## AXTree:
+hello world
+""",
+            }
+        ]
         result = rlm(messages)
 
-        assert result["content"] == "found it"
+        assert "<action>click('20')</action>" in result["content"]
         assert mock.call_count == 2
 
     def test_max_iterations_error(self):
         """Test that max iterations raises error."""
-        mock = MockChatModel(["print('still searching...')"])  # Never returns FINAL
+        mock = MockChatModel(["```python\nprint('still searching...')\n```"])  # Never returns FINAL
         rlm = RLMChatModel(inner_model=mock, max_iterations=3)
 
-        messages = [{"role": "user", "content": "test"}]
+        messages = [{"role": "user", "content": "## Chat messages:\n - [user] test"}]
         with pytest.raises(MaxIterationsError):
             rlm(messages)
 
@@ -278,13 +489,13 @@ class TestRLMChatModel:
     def test_stats_tracking(self):
         """Test that stats are properly tracked."""
         responses = [
-            "print(len(context))",
+            "```python\nprint(len(context['axtree']))\n```",
             'FINAL("done")',
         ]
         mock = MockChatModel(responses)
         rlm = RLMChatModel(inner_model=mock)
 
-        messages = [{"role": "user", "content": "test"}]
+        messages = [{"role": "user", "content": "## Chat messages:\n - [user] test\n\n## AXTree:\ntest"}]
         rlm(messages)
 
         stats = rlm.get_stats()

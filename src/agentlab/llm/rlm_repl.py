@@ -47,12 +47,12 @@ class REPLExecutor:
         self.timeout = timeout
         self.max_output_chars = max_output_chars
 
-    def execute(self, code: str, env: dict[str, Any]) -> str:
+    def execute(self, response: str, env: dict[str, Any]) -> str:
         """
         Execute Python code in restricted environment.
 
         Args:
-            code: Python code to execute
+            response: LLM response that may contain code in ```python blocks
             env: Environment with context, query, recursive_llm, etc.
 
         Returns:
@@ -61,15 +61,18 @@ class REPLExecutor:
         Raises:
             REPLError: If code execution fails
         """
-        # Import here to avoid import errors if RestrictedPython not installed
+        # Extract code from markdown blocks - ONLY execute properly formatted code
+        code = self._extract_code(response)
 
-
-
-        # Filter out code blocks if present (LLM might wrap code)
-        code = self._extract_code(code)
+        if code is None:
+            # No code block found - don't execute raw text!
+            return (
+                "No code block found. Write Python code in ```python blocks to explore the context.\n"
+                "Example:\n```python\nprint(context['axtree'][:500])\n```"
+            )
 
         if not code.strip():
-            return "No code to execute"
+            return "Empty code block. Write Python code to explore the context."
 
         # Build restricted globals
         restricted_globals = self._build_globals(
@@ -140,15 +143,19 @@ class REPLExecutor:
         finally:
             sys.stdout = old_stdout
 
-    def _extract_code(self, text: str) -> str:
+    def _extract_code(self, text: str) -> str | None:
         """
-        Extract code from markdown code blocks if present.
+        Extract code from markdown code blocks.
+
+        Only returns code that is properly wrapped in ```python or ``` blocks.
+        Returns None if no valid code block is found - this prevents
+        accidentally executing raw text like action commands.
 
         Args:
-            text: Raw text that might contain code
+            text: LLM response that may contain code blocks
 
         Returns:
-            Extracted code
+            Extracted code, or None if no valid code block found
         """
         # Check for markdown code blocks with python tag
         if "```python" in text:
@@ -160,11 +167,16 @@ class REPLExecutor:
         # Check for generic code blocks
         if "```" in text:
             start = text.find("```") + 3
+            # Skip any language tag on the same line
+            newline = text.find("\n", start)
+            if newline != -1 and newline < start + 20:  # language tag is short
+                start = newline
             end = text.find("```", start)
             if end != -1:
                 return text[start:end].strip()
 
-        return text
+        # No valid code block found - return None to prevent raw text execution
+        return None
 
     def _build_globals(
         self,

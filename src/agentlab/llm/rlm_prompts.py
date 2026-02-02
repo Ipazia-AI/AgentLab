@@ -5,59 +5,120 @@ This module provides prompt building functions for the RLM approach.
 The prompts instruct the model to explore context through a Python REPL
 environment rather than having the context directly in the prompt.
 
+The prompts are agent-aware - they understand that the final output
+should be an action in the correct format for the downstream agent.
+
 Based on the RLM paper (arXiv:2512.24601).
 """
 
 
-def build_system_prompt(context_size: int, depth: int = 0) -> str:
+def build_system_prompt(
+    context_info: dict[str, int], action_format: str, depth: int = 0
+) -> str:
     """
-    Build system prompt for RLM.
+    Build system prompt for RLM with agent context awareness.
 
     Args:
-        context_size: Size of context in characters
+        context_info: Dict mapping context keys to their character counts
+        action_format: Action space description from the agent
         depth: Current recursion depth (0 = root)
 
     Returns:
         System prompt string
     """
-    prompt = f"""You are a Recursive Language Model. You interact with context through a Python REPL environment.
+    # Format context info as readable list
+    context_desc = "\n".join(
+        f"  - context['{key}']: {size:,} characters"
+        for key, size in context_info.items()
+        if size > 0
+    )
 
-The context is stored in variable `context` (not in this prompt). Size: {context_size:,} characters.
-IMPORTANT: You cannot see the context directly. You MUST write Python code to search and explore it.
+    if not context_desc:
+        context_desc = "  - context: (empty)"
 
-Available in environment:
-- context: str (the document to analyze)
-- query: str (the question/task)
-- recursive_llm(sub_query, sub_context) -> str (recursively process sub-context with another LLM call)
-- re: already imported regex module (use re.findall, re.search, etc.)
+    prompt = f"""You are a Recursive Language Model helping a web automation agent.
 
-Write Python code to answer the query. The last expression or print() output will be shown to you.
+## Context Structure
 
-Examples:
-- print(context[:500])  # See first 500 chars
-- matches = re.findall(r'keyword.*', context); print(matches[:5])
-- idx = context.find('search term'); print(context[idx:idx+200])
+The web page observations are stored in a `context` dictionary (NOT in this prompt).
+You MUST write Python code to explore and search this context.
 
-For large contexts, use recursive_llm to process chunks:
+Available context keys:
+{context_desc}
+
+## Environment Variables
+
+Available in the Python REPL:
+- context: dict with keys 'axtree', 'html', 'goal', 'error', 'focused_element', 'tabs', 'history'
+- query: str (the task to perform)
+- recursive_llm(sub_query, sub_context) -> str (recursively process with another LLM)
+- re: the regex module (already imported)
+
+## How to Explore
+
+Write Python code in ```python blocks to explore the context:
+
 ```python
-chunks = [context[i:i+5000] for i in range(0, len(context), 5000)]
-results = []
-for chunk in chunks:
-    answer = recursive_llm("Extract key information from this chunk", chunk)
-    results.append(answer)
-print(results)
+# See available keys
+print(context.keys())
 ```
 
-CRITICAL: Do NOT guess or make up answers. You MUST search the context first to find the actual information.
-Only use FINAL("answer") after you have found concrete evidence in the context.
+```python
+# View the accessibility tree (most useful for finding elements)
+print(context['axtree'][:1000])
+```
 
-When ready to answer, use one of:
-- FINAL("your answer here") - provide the answer directly
-- FINAL_VAR(variable_name) - return a variable from the REPL environment
+```python
+# Search for an element
+matches = re.findall(r'\\[\\d+\\].*button.*', context['axtree'], re.IGNORECASE)
+print(matches[:5])
+```
+
+```python
+# View HTML for detailed structure
+print(context['html'][:500])
+```
+
+## CRITICAL RULES
+
+1. ALWAYS write code in ```python blocks - raw text is NOT executed
+2. ALWAYS search the context BEFORE deciding on an action
+3. NEVER guess element IDs - find them in the axtree or html
+4. The `bid` attribute identifies clickable elements
+
+## Output Format
+
+When you have found the correct element and are ready to act, call FINAL() with the action:
+
+FINAL("<action>click('20')</action>")
+
+Or for other actions:
+FINAL("<action>fill('15', 'search text')</action>")
+FINAL("<action>keyboard_press('Enter')</action>")
+
+The action MUST be wrapped in <action></action> tags inside FINAL().
+
+You can also use FINAL_VAR(variable_name) to return a variable from the REPL.
+
+{_build_action_section(action_format)}
 
 Depth: {depth}"""
 
     return prompt
+
+
+def _build_action_section(action_format: str) -> str:
+    """Build the action format section if available."""
+    if not action_format:
+        return ""
+
+    return f"""## Action Space
+
+{action_format}
+
+Remember: Wrap your chosen action in <action></action> tags inside FINAL().
+Example: FINAL("<action>click('bid_value')</action>")
+"""
 
 
 def build_user_prompt(query: str) -> str:

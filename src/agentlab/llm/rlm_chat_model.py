@@ -24,7 +24,6 @@ Example usage:
     rlm = args.make_model()
 """
 
-import concurrent.futures
 import logging
 import re
 from dataclasses import dataclass, field
@@ -33,6 +32,10 @@ from typing import Any
 from .base_api import AbstractChatModel, BaseModelArgs
 from .llm_utils import AIMessage
 from .rlm_parser import is_final, parse_response
+from .rlm_prompt_parser import (
+    build_context_dict,
+    parse_agent_prompt,
+)
 from .rlm_prompts import build_system_prompt
 from .rlm_repl import REPLError, REPLExecutor
 
@@ -124,13 +127,16 @@ class RLMChatModel(AbstractChatModel):
             raise MaxDepthError(f"Max recursion depth ({self.max_depth}) exceeded")
 
         # Extract query and context from messages
-        query, context, images = self._extract_query_and_context(messages)
+        query, context, images, action_format = self._extract_query_and_context(messages)
+
+        # Get context size info for prompt
+        context_info = {k: len(v) for k, v in context.items() if v}
 
         # Initialize REPL environment
         repl_env = self._build_repl_env(query, context)
 
-        # Build RLM conversation
-        system_prompt = build_system_prompt(len(context), self._current_depth)
+        # Build RLM conversation with action format
+        system_prompt = build_system_prompt(context_info, action_format, self._current_depth)
         rlm_messages: list[dict] = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": query},
@@ -195,91 +201,35 @@ class RLMChatModel(AbstractChatModel):
 
     def _extract_query_and_context(
         self, messages: list[dict]
-    ) -> tuple[str, str, list[dict]]:
+    ) -> tuple[str, dict[str, Any], list[dict], str]:
         """
-        Extract query and context from message list.
+        Extract query and context from GenericAgent message list.
 
-        Strategy:
-        - System messages become part of context (instructions)
-        - User text content becomes context
-        - Last user message (text part) is the query
-        - Images are collected separately to keep in prompt
+        Uses the prompt parser to correctly separate:
+        - Task (short query) - what to do
+        - Observations (HTML, AXTree, etc.) - externalized to REPL context dict
+        - History - externalized to REPL context dict
+        - Action format - kept visible in RLM prompt
 
         Args:
             messages: List of message dicts
 
         Returns:
-            Tuple of (query, text_context, list_of_images)
+            Tuple of (query, context_dict, images, action_format)
         """
-        context_parts = []
-        images = []
-        last_user_text = ""
+        # Parse the GenericAgent prompt structure
+        parsed = parse_agent_prompt(messages)
 
-        for msg in messages:
-            role = msg.get("role", "")
-            content = msg.get("content", "")
+        # Short query - the actual task
+        query = parsed.task
 
-            if role == "system":
-                # System messages become context
-                text = self._extract_text_from_content(content)
-                if text:
-                    context_parts.append(f"[System Instructions]\n{text}")
+        # Context dict for REPL exploration (NOT a string!)
+        context = build_context_dict(parsed)
 
-            elif role == "user":
-                # User messages: extract text and images
-                text = self._extract_text_from_content(content)
-                msg_images = self._extract_images_from_content(content)
+        # Action format to keep visible in prompt
+        action_format = parsed.action_format
 
-                if text:
-                    context_parts.append(f"[User]\n{text}")
-                    last_user_text = text
-
-                images.extend(msg_images)
-
-            elif role == "assistant":
-                # Assistant history can provide context
-                text = self._extract_text_from_content(content)
-                if text:
-                    context_parts.append(f"[Assistant]\n{text}")
-
-        # Combine context
-        context = "\n\n".join(context_parts)
-
-        # Use last user message as the query
-        query = last_user_text or "Process the context and provide an answer."
-
-        return query, context, images
-
-    def _extract_text_from_content(self, content: str | list[dict]) -> str:
-        """Extract text from message content (handles multimodal format)."""
-        if isinstance(content, str):
-            return content
-
-        if isinstance(content, list):
-            text_parts = []
-            for item in content:
-                if isinstance(item, dict):
-                    if item.get("type") == "text":
-                        text_parts.append(item.get("text", ""))
-                    elif item.get("type") == "input_text":
-                        text_parts.append(item.get("input_text", ""))
-            return "\n".join(text_parts)
-
-        return ""
-
-    def _extract_images_from_content(self, content: str | list[dict]) -> list[dict]:
-        """Extract image items from message content."""
-        if isinstance(content, str):
-            return []
-
-        if isinstance(content, list):
-            images = []
-            for item in content:
-                if isinstance(item, dict) and item.get("type") == "image_url":
-                    images.append(item)
-            return images
-
-        return []
+        return query, context, parsed.images, action_format
 
     def _add_images_to_message(
         self, message: dict, images: list[dict]
@@ -298,19 +248,19 @@ class RLMChatModel(AbstractChatModel):
 
         return {"role": message["role"], "content": new_content}
 
-    def _build_repl_env(self, query: str, context: str) -> dict[str, Any]:
+    def _build_repl_env(self, query: str, context: dict[str, Any]) -> dict[str, Any]:
         """
-        Build REPL environment with context, query, and recursive_llm function.
+        Build REPL environment with context dict, query, and recursive_llm function.
 
         Args:
-            query: The user query
-            context: The externalized context string
+            query: The user query (short task description)
+            context: Dict with observations (axtree, html, history, etc.)
 
         Returns:
             Environment dict for REPL execution
         """
         return {
-            "context": context,
+            "context": context,  # Dict with axtree, html, history, etc.
             "query": query,
             "recursive_llm": self._make_recursive_fn(),
             "re": re,  # Pre-import re module
