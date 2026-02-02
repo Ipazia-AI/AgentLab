@@ -109,6 +109,7 @@ class HPA:
                 if self._check_and_complete(node):
                     node.status = NodeStatus.SUCCESS
                     return
+            
             node.status = NodeStatus.FAILED
             self.stack.append((node, NodeState.FAILED))
 
@@ -203,7 +204,10 @@ class HPA:
         return node.status == NodeStatus.SUCCESS
     
     def _is_successful_and(self, node: Node) -> bool: 
-        return all(c.status == NodeStatus.SUCCESS for c in node.children)
+        valid_children = self._valid_children(node)
+        if not valid_children:
+            return False
+        return all(c.status == NodeStatus.SUCCESS for c in valid_children)
     
     def _is_successful_or(self, node: Node) -> bool: 
         return any(c.status == NodeStatus.SUCCESS for c in node.children)
@@ -225,7 +229,16 @@ class HPA:
         return any(c.status not in {NodeStatus.PRUNED, NodeStatus.DELETED} for c in node.children)
     
     def _check_and_complete(self, node: Node) -> bool: 
-        return all(c.status == NodeStatus.SUCCESS for c in node.children)
+        valid_children = self._valid_children(node)
+        if not valid_children:
+            return False
+        return all(c.status == NodeStatus.SUCCESS for c in valid_children)
+
+    def _valid_children(self, node: Node) -> list[Node]:
+        return [c for c in node.children if c.status not in {NodeStatus.PRUNED, NodeStatus.DELETED}]
+
+    def _is_root(self, node: Node) -> bool:
+        return node.parent is None
 
 
 def main():
