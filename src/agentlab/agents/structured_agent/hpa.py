@@ -15,12 +15,15 @@ class HPA:
         self.budget = budget # remove
         self.max_revision_count = max_revision_count
         self.stack: List[Tuple[Node, NodeState]] = []
+        self.goal: str | None = None
+        self._counter = 0
 
-    # and_or_tree_traversal
-    def and_or_tree_traversal(self, root_node: Node, env, goal: str | None = None):
+    def reset(self, root_node: Node, goal: str | None = None):
         self.stack = [(root_node, NodeState.ENTERING)]
-        counter = 0
+        self.goal = goal
+        self._counter = 0
 
+    def run_until_action(self) -> Node | None:
         while self.stack:
             node, state = self.stack.pop()
 
@@ -32,7 +35,9 @@ class HPA:
                 continue
 
             if state == NodeState.ENTERING:
-                self._process_node_entering(node, env, goal)
+                action_node = self._process_node_entering(node, self.goal)
+                if action_node is not None:
+                    return action_node
 
             elif state == NodeState.EXITING:
                 self._process_node_exiting(node)
@@ -40,38 +45,39 @@ class HPA:
             elif state == NodeState.FAILED:
                 self._process_node_failed(node)
 
-            counter += 1
-            if counter >= self.budget:
+            self._counter += 1
+            if self._counter >= self.budget:
                 break
 
-        return root_node.status
+        return None
+
+    def finalize_action(self, node: Node, obs: dict, success: bool):
+        if success:
+            self._global_tree_update()
+            self._update_observations(node, obs)
+            node.status = NodeStatus.SUCCESS
+        else:
+            node.status = NodeStatus.FAILED
 
     # Algo 2 from the HPA paper
-    def _process_node_entering(self, node: Node, env, goal: str | None):
+    def _process_node_entering(self, node: Node, goal: str | None) -> Node | None:
         if node.parent and node.parent.type == NodeType.OR:
             self._rollback_context(node.parent)
 
         self._set_context(node)
         node.execution_count += 1
 
-        if node.type == NodeType.UNKNOWN:
-            node.type = self._populate_node_type(node, goal)
-            self.stack.append((node, NodeState.EXITING))
+        if node.status == NodeStatus.UNVISITED:
+            node.type = self._expand_node(node, goal)
+            #self.stack.append((node, NodeState.EXITING))
 
         if node.type == NodeType.ACTION:
             self.stack.append((node, NodeState.EXITING))
-            success = self._perform_action(node, env)
-            if success:
-                self._global_tree_update()
-                self._update_observations(node)
-                node.status = NodeStatus.SUCCESS
-            else:
-                node.status = NodeStatus.FAILED
-            return
+            return node
 
         if node.type == NodeType.AND:
             if self._is_successful(node):
-                return
+                return None
             if self._has_valid_child(node):
                 for child in reversed(node.children):
                     if child.status not in self._closed_statuses():
@@ -81,12 +87,13 @@ class HPA:
 
         if node.type == NodeType.OR:
             if self._is_successful(node):
-                return
+                return None
             if self._is_valid_or(node):
                 child = self._select_promising_child(node)
                 self.stack.append((child, NodeState.ENTERING))
             else:
                 node.status = NodeStatus.FAILED
+        return None
 
     # Algo 3 from the HPA paper
     def _process_node_exiting(self, node: Node):
@@ -102,6 +109,7 @@ class HPA:
                 if self._check_and_complete(node):
                     node.status = NodeStatus.SUCCESS
                     return
+            
             node.status = NodeStatus.FAILED
             self.stack.append((node, NodeState.FAILED))
 
@@ -153,17 +161,8 @@ class HPA:
                 self._synchronize_stack()
                 self._propagate_failure(node)
 
-    def _populate_node_type(self, node: Node, goal: str | None) -> NodeType:
+    def _expand_node(self, node: Node, goal: str | None) -> NodeType:
         return NodeType.ACTION
-
-    def _perform_action(self, node: Node, env) -> bool:
-        # Need to implement action execution logic
-        try:
-            env.step(node.description)
-            return True
-        except Exception as exc:
-            logging.warning(f"HPA action failed: {exc}")
-            return False
 
     def _select_promising_child(self, node: Node) -> Node:
         # Need to implement child selection logic
@@ -178,7 +177,7 @@ class HPA:
     def _global_tree_update(self): 
         pass
 
-    def _update_observations(self, node: Node): 
+    def _update_observations(self, node: Node, obs: dict): 
         pass
 
     def _propagate_failure(self, node: Node): 
@@ -205,7 +204,10 @@ class HPA:
         return node.status == NodeStatus.SUCCESS
     
     def _is_successful_and(self, node: Node) -> bool: 
-        return all(c.status == NodeStatus.SUCCESS for c in node.children)
+        valid_children = self._valid_children(node)
+        if not valid_children:
+            return False
+        return all(c.status == NodeStatus.SUCCESS for c in valid_children)
     
     def _is_successful_or(self, node: Node) -> bool: 
         return any(c.status == NodeStatus.SUCCESS for c in node.children)
@@ -227,13 +229,25 @@ class HPA:
         return any(c.status not in {NodeStatus.PRUNED, NodeStatus.DELETED} for c in node.children)
     
     def _check_and_complete(self, node: Node) -> bool: 
-        return all(c.status == NodeStatus.SUCCESS for c in node.children)
+        valid_children = self._valid_children(node)
+        if not valid_children:
+            return False
+        return all(c.status == NodeStatus.SUCCESS for c in valid_children)
+
+    def _valid_children(self, node: Node) -> list[Node]:
+        return [c for c in node.children if c.status not in {NodeStatus.PRUNED, NodeStatus.DELETED}]
+
+    def _is_root(self, node: Node) -> bool:
+        return node.parent is None
 
 
 def main():
-    root = Node(NodeType.UNKNOWN, description="Solve task")
+    root = Node(type=NodeType.UNKNOWN, text="Solve task")
     agent = HPA(chat_llm=None, action_set=None)
-    agent.and_or_tree_traversal(root_node=root, env=None, goal="Complete the task")
+    agent.reset(root_node=root, goal="Complete the task")
+    next_action = agent.run_until_action()
+    if next_action is not None:
+        logging.info("Next action: %s", next_action.text)
 
 
 if __name__ == "__main__":

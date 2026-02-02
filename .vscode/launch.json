@@ -14,6 +14,16 @@
             "env": {
                 "AGENTLAB_DEBUG": "1"
             }
+        },
+        {
+            "name": "HPA",
+            "type": "debugpy",
+            "python": "${workspaceFolder}/.venv/bin/python",
+            "request": "launch",
+            "program": "tutorials/4_hpa_on_workarena/experiment.py",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "envFile": "${workspaceFolder}/.env"
         }
     ]
 }

@@ -11,3 +11,10 @@ This module contains the agent implementations for AgentLab. With currently:
 
 - VisualWebArenaAgent: An implementation of the agent used in WebArena and VisualWebArena
 """
+
+from agentlab.agents.structured_agent.hpa_agent import HPAAgent, HPAAgentArgs
+
+__all__ = [
+    "HPAAgent",
+    "HPAAgentArgs",
+]
