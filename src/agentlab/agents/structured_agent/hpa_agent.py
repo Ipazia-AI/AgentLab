@@ -1,18 +1,20 @@
 from dataclasses import dataclass
 from typing import Any
 
-import bgym  # type: ignore[import-not-found]
+from browsergym.core.action.highlevel import HighLevelActionSet
 
 from agentlab.agents.agent_args import AgentArgs
 from agentlab.agents.dynamic_prompting import ObsFlags, make_obs_preprocessor
+from agentlab.agents.generic_agent.generic_agent import GenericAgent, GenericAgentArgs
 from agentlab.llm.base_api import BaseModelArgs
+from agentlab.llm.tracking import cost_tracker_decorator
 
 from .andor_tree import Node, NodeType
 from .hpa import HPA
 
 
 @dataclass
-class HPAAgentArgs(AgentArgs):
+class HPAAgentArgs(GenericAgentArgs):
     chat_model_args: BaseModelArgs | None = None
     goal_text: str = "Solve task"
     budget: int = 1000
@@ -26,7 +28,7 @@ class HPAAgentArgs(AgentArgs):
         else:
             self.agent_name = "HPAAgent"
 
-    def make_agent(self) -> bgym.Agent:
+    def make_agent(self) -> GenericAgent:
         return HPAAgent(
             chat_model_args=self.chat_model_args,
             goal_text=self.goal_text,
@@ -47,7 +49,7 @@ class HPAAgentArgs(AgentArgs):
         return None
 
 
-class HPAAgent(bgym.Agent):
+class HPAAgent(GenericAgent):
     def __init__(
         self,
         chat_model_args: BaseModelArgs | None,
@@ -58,9 +60,7 @@ class HPAAgent(bgym.Agent):
         multiaction: bool,
     ):
         self.chat_llm = chat_model_args.make_model() if chat_model_args is not None else None
-        self.action_set: bgym.AbstractActionSet = bgym.HighLevelActionSet(
-            action_subsets, multiaction=multiaction
-        )
+        self.action_set = HighLevelActionSet(action_subsets, multiaction=multiaction)
 
         self._obs_preprocessor = make_obs_preprocessor(ObsFlags())
 
@@ -79,11 +79,14 @@ class HPAAgent(bgym.Agent):
         return self._obs_preprocessor(obs)
 
     def reset(self, seed=None):
+        super().reset(seed)
         self.root_node = Node(type=NodeType.UNKNOWN, text=self.goal_text)
         self.hpa.reset(self.root_node, goal=self.goal_text)
         self.pending_action_node = None
 
+    @cost_tracker_decorator
     def get_action(self, obs: Any) -> tuple[str | None, dict]:
+
         if self.pending_action_node is not None and isinstance(obs, dict):
             success = "axtree_txt" in obs and obs.get("axtree_txt") is not None
             self.hpa.finalize_action(self.pending_action_node, obs, success)
@@ -98,12 +101,12 @@ class HPAAgent(bgym.Agent):
         agent_info = {
             "stats": {},
             "hpa": {
-                "pending_node_id": str(self.pending_action_node.id)
-                if self.pending_action_node
-                else None,
-                "pending_node_type": self.pending_action_node.type.name
-                if self.pending_action_node
-                else None,
+                "pending_node_id": (
+                    str(self.pending_action_node.id) if self.pending_action_node else None
+                ),
+                "pending_node_type": (
+                    self.pending_action_node.type.name if self.pending_action_node else None
+                ),
                 "root_status": self.root_node.status.name,
                 "stack_depth": len(self.hpa.stack),
             },
