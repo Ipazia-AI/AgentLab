@@ -14,6 +14,17 @@
             "env": {
                 "AGENTLAB_DEBUG": "1"
             }
+        },
+        {
+            "name": "Run MiniWob RLM",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "run_miniwob_rlm.py",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "env": {
+                "AGENTLAB_DEBUG": "1"
+            }
         }
     ]
 }

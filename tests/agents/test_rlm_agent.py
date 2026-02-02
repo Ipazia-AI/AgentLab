@@ -5,22 +5,21 @@ from dataclasses import dataclass
 from unittest.mock import MagicMock
 
 import pytest
+from bgym import HighLevelActionSetArgs
 
+from agentlab.agents.dynamic_prompting import ActionFlags, ObsFlags
 from agentlab.agents.rlm_agent import (
+    REPLError,
+    REPLExecutor,
     RLMGenericAgent,
     RLMGenericAgentArgs,
     RLMPromptFlags,
-    REPLExecutor,
-    REPLError,
+    extract_final,
     is_final,
     parse_response,
-    extract_final,
 )
-from agentlab.agents.dynamic_prompting import ObsFlags, ActionFlags
 from agentlab.llm.chat_api import BaseModelArgs
 from agentlab.llm.llm_utils import Discussion
-from bgym import HighLevelActionSetArgs
-
 
 # ============================================================================
 # REPL Tests
