@@ -96,17 +96,31 @@ class REPLExecutor:
             if byte_code.errors:
                 raise REPLError(f"Compilation error: {', '.join(byte_code.errors)}")
 
-            # Execute
-            exec(byte_code.code, restricted_globals, env)
+            # Merge env variables into restricted_globals so they're accessible
+            # during execution (exec uses globals for name lookups when not in locals)
+            exec_globals = restricted_globals.copy()
+            exec_globals.update(env)
 
-            # Get output from stdout
-            output = captured_output.getvalue()
+            # Execute - use exec_globals as both globals and locals
+            # so that variables defined during execution are also accessible
+            exec(byte_code.code, exec_globals)
 
-            # Get output from PrintCollector if available
-            if "_print" in env and hasattr(env["_print"], "__call__"):
-                print_collector = env["_print"]
+            # Copy any new variables back to env for future reference
+            for key in exec_globals:
+                if key not in restricted_globals:
+                    env[key] = exec_globals[key]
+
+            # Get output from PrintCollector (RestrictedPython redirects print here)
+            output = ""
+            if "_print" in exec_globals:
+                print_collector = exec_globals["_print"]
                 if hasattr(print_collector, "txt"):
-                    output += "".join(print_collector.txt)
+                    output = "".join(print_collector.txt)
+
+            # Also check stdout (for any direct writes that bypassed PrintCollector)
+            stdout_output = captured_output.getvalue()
+            if stdout_output:
+                output = stdout_output + output
 
             # Check if last line was an expression (try to get its value)
             lines = code.strip().split("\n")
@@ -116,7 +130,8 @@ class REPLExecutor:
                 keywords = ["=", "import", "def", "class", "if", "for", "while", "with"]
                 if last_line and not any(kw in last_line for kw in keywords):
                     try:
-                        result = eval(last_line, restricted_globals, env)
+                        # Use exec_globals for eval so context and other vars are accessible
+                        result = eval(last_line, exec_globals)
                         if result is not None:
                             output += str(result) + "\n"
                     except Exception:
