@@ -427,45 +427,57 @@ class ExpArgs:
             )
 
             logger.debug("Environment created.")
-            step_info = StepInfo(step=0)
-            episode_info = [step_info]
-            step_info.from_reset(
-                env, seed=self.env_args.task_seed or 0, obs_preprocessor=agent.obs_preprocessor
-            )
-            logger.debug("Environment reset.")
-
-            while not step_info.is_done:  # set a limit
-                logger.debug(f"Starting step {step_info.step}.")
-                action = step_info.from_action(agent)
-                logger.debug(f"Agent chose action:\n {action}")
-
-                if action is None:
-                    # will end the episode after saving the step info.
-                    step_info.truncated = True
-
-                step_info.save_step_info(
-                    self.exp_dir, save_screenshot=self.save_screenshot, save_som=self.save_som
+            seed = self.env_args.task_seed or 0
+            if hasattr(agent, "run_episode"):
+                logger.debug("Agent has run_episode; delegating episode to agent.")
+                episode_info = agent.run_episode(
+                    env,
+                    self.exp_dir,
+                    seed=seed,
+                    obs_preprocessor=agent.obs_preprocessor,
+                    save_screenshot=self.save_screenshot,
+                    save_som=self.save_som,
                 )
-                logger.debug("Step info saved.")
+                step_info = episode_info[-1] if episode_info else None
+            else:
+                step_info = StepInfo(step=0)
+                episode_info = [step_info]
+                step_info.from_reset(
+                    env, seed=seed, obs_preprocessor=agent.obs_preprocessor
+                )
+                logger.debug("Environment reset.")
+                while not step_info.is_done:  # set a limit
+                    logger.debug(f"Starting step {step_info.step}.")
+                    action = step_info.from_action(agent)
+                    logger.debug(f"Agent chose action:\n {action}")
 
-                if hasattr(env.unwrapped, "chat") and isinstance(env.unwrapped.chat, Chat):
-                    _send_chat_info(env.unwrapped.chat, action, step_info.agent_info)
-                    logger.debug("Chat info sent.")
+                    if action is None:
+                        # will end the episode after saving the step info.
+                        step_info.truncated = True
 
-                if action is None:
-                    logger.debug("Agent returned None action. Ending episode.")
-                    break
-
-                step_info = StepInfo(step=step_info.step + 1)
-                episode_info.append(step_info)
-
-                logger.debug("Sending action to environment.")
-                step_info.from_step(env, action, obs_preprocessor=agent.obs_preprocessor)
-                logger.debug("Environment stepped.")
-                if step_info.is_done:
-                    logger.debug(
-                        f"Episode done: terminated: {step_info.terminated}, truncated: {step_info.truncated}."
+                    step_info.save_step_info(
+                        self.exp_dir, save_screenshot=self.save_screenshot, save_som=self.save_som
                     )
+                    logger.debug("Step info saved.")
+
+                    if hasattr(env.unwrapped, "chat") and isinstance(env.unwrapped.chat, Chat):
+                        _send_chat_info(env.unwrapped.chat, action, step_info.agent_info)
+                        logger.debug("Chat info sent.")
+
+                    if action is None:
+                        logger.debug("Agent returned None action. Ending episode.")
+                        break
+
+                    step_info = StepInfo(step=step_info.step + 1)
+                    episode_info.append(step_info)
+
+                    logger.debug("Sending action to environment.")
+                    step_info.from_step(env, action, obs_preprocessor=agent.obs_preprocessor)
+                    logger.debug("Environment stepped.")
+                    if step_info.is_done:
+                        logger.debug(
+                            f"Episode done: terminated: {step_info.terminated}, truncated: {step_info.truncated}."
+                        )
 
         except Exception as e:
             err_msg = f"Exception uncaught by agent or environment in task {self.env_args.task_name}.\n{type(e).__name__}:\n{e}"
