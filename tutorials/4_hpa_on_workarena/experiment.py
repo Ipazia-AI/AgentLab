@@ -13,7 +13,6 @@ load_dotenv(project_dir.joinpath(".env"), override=False)
 
 
 agent_config = HPAAgentArgs(
-    goal_text="Solve the WorkArena task",
     action_subsets=("workarena",),
     multiaction=False,
     chat_model_args=AGENT_4o_MINI.chat_model_args,
@@ -23,7 +22,12 @@ agent_config = HPAAgentArgs(
 
 agent_configs = [agent_config]
 benchmark = DEFAULT_BENCHMARKS["workarena_l1"]()
-benchmark.env_args_list = benchmark.env_args_list[:1]
+# benchmark.env_args_list = benchmark.env_args_list[:1]
+
+metadata = benchmark.task_metadata
+tasks_workload = metadata[metadata["task_name"].str.match("workarena.servicenow.filter-asset-list")]
+tasks_list = tasks_workload["task_name"].tolist()
+benchmark = benchmark.subset_from_list(tasks_list)
 
 
 # Optionally filter tasks:

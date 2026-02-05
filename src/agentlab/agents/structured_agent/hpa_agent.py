@@ -16,7 +16,6 @@ from .hpa import HPA
 @dataclass
 class HPAAgentArgs(GenericAgentArgs):
     chat_model_args: BaseModelArgs | None = None
-    goal_text: str = "Solve task"
     budget: int = 1000
     max_revision_count: int = 3
     action_subsets: tuple[str, ...] = ("workarena",)
@@ -31,7 +30,6 @@ class HPAAgentArgs(GenericAgentArgs):
     def make_agent(self) -> GenericAgent:
         return HPAAgent(
             chat_model_args=self.chat_model_args,
-            goal_text=self.goal_text,
             budget=self.budget,
             max_revision_count=self.max_revision_count,
             action_subsets=self.action_subsets,
@@ -53,7 +51,6 @@ class HPAAgent(GenericAgent):
     def __init__(
         self,
         chat_model_args: BaseModelArgs | None,
-        goal_text: str,
         budget: int,
         max_revision_count: int,
         action_subsets: tuple[str, ...],
@@ -70,36 +67,39 @@ class HPAAgent(GenericAgent):
             budget=budget,
             max_revision_count=max_revision_count,
         )
-        self.goal_text = goal_text
-        self.root_node = Node(type=NodeType.UNKNOWN, text=self.goal_text)
-        self.hpa.reset(self.root_node, goal=self.goal_text)
-        self.pending_action_node: Node | None = None
-
-    def obs_preprocessor(self, obs: dict) -> dict:
-        return self._obs_preprocessor(obs)
+        self._local_reset()
 
     def reset(self, seed=None):
         super().reset(seed)
-        self.root_node = Node(type=NodeType.UNKNOWN, text=self.goal_text)
-        self.hpa.reset(self.root_node, goal=self.goal_text)
+        self._local_reset()
+
+    def _local_reset(self):
+        self.hpa.reset()
         self.pending_action_node = None
 
     @cost_tracker_decorator
     def get_action(self, obs: Any) -> tuple[str | None, dict]:
+
+        obs = self.obs_preprocessor(obs)
+        goal = self._extract_goal(obs)
 
         if self.pending_action_node is not None and isinstance(obs, dict):
             success = "axtree_txt" in obs and obs.get("axtree_txt") is not None
             self.hpa.finalize_action(self.pending_action_node, obs, success)
             self.pending_action_node = None
 
-        action_node = self.hpa.run_until_action()
+        action_node = self.hpa.run_until_action(
+            goal=goal,
+            obs=obs,
+        )
+
         action = None
         if action_node is not None:
             action = action_node.text
             self.pending_action_node = action_node
 
         agent_info = {
-            "stats": {},
+            "stats": self.chat_llm.get_stats(),
             "hpa": {
                 "pending_node_id": (
                     str(self.pending_action_node.id) if self.pending_action_node else None
@@ -107,8 +107,22 @@ class HPAAgent(GenericAgent):
                 "pending_node_type": (
                     self.pending_action_node.type.name if self.pending_action_node else None
                 ),
-                "root_status": self.root_node.status.name,
                 "stack_depth": len(self.hpa.stack),
             },
         }
         return action, agent_info
+
+    def _extract_goal(self, obs: dict) -> str:
+        """Extract goal string from observation."""
+        if "goal" in obs and obs["goal"]:
+            return obs["goal"]
+
+        if "goal_object" in obs:
+            g_obj = obs["goal_object"]
+            if isinstance(g_obj, tuple):
+                g_obj = g_obj[0]
+            if isinstance(g_obj, dict):
+                return g_obj.get("text", "Complete the task.")
+            return str(g_obj)
+
+        return "Complete the task."
