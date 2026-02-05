@@ -62,9 +62,9 @@ class HPA:
                 continue
 
             if state == NodeState.ENTERING:
-                node = self._process_node_entering(node, goal, obs)
-                if node.type == NodeType.ACTION:
-                    return node
+                action_node = self._process_node_entering(node, goal, obs)
+                if action_node.type == NodeType.ACTION:
+                    return action_node
 
             elif state == NodeState.EXITING:
                 self._process_node_exiting(node)
