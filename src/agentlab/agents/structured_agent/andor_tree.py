@@ -1,6 +1,6 @@
 from collections.abc import Callable
 from enum import Enum, auto
-from typing import Any, Literal, Protocol, Optional
+from typing import Any, Literal, Optional, Protocol
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field
@@ -17,7 +17,7 @@ class NodeStatus(Enum):
     UNVISITED = auto()
     VISITED = auto()
     SUCCESS = auto()
-    FAILED = auto()
+    FAIL = auto()
     PRUNED = auto()
     DELETED = auto()
 

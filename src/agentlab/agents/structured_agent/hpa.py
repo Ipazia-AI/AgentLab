@@ -62,9 +62,9 @@ class HPA:
                 continue
 
             if state == NodeState.ENTERING:
-                action_node = self._process_node_entering(node, goal, obs)
-                if action_node is not None:
-                    return action_node
+                node = self._process_node_entering(node, goal, obs)
+                if node.type == NodeType.ACTION:
+                    return node
 
             elif state == NodeState.EXITING:
                 self._process_node_exiting(node)
@@ -84,87 +84,84 @@ class HPA:
             self._update_observations(node, obs)
             node.status = NodeStatus.SUCCESS
         else:
-            node.status = NodeStatus.FAILED
+            node.status = NodeStatus.FAIL
 
     # Algo 2 from the HPA paper
-    def _process_node_entering(self, node: Node, goal: str | None, obs: dict) -> Node | None:
+    def _process_node_entering(self, node: Node, goal: str | None, obs: dict) -> Node:
         if node.parent and node.parent.type == NodeType.OR:
+            # TODO: The role of this function is not clear, let's check it later what it is supposed to do.
             self._rollback_context(node.parent)
-
+        
+        # TODO: The role of this function is not clear, let's check it later what it is supposed to do.
         self._set_context(node)
         node.execution_count += 1
 
         if node.type == NodeType.UNKNOWN:
             self._expand_node(node, goal, obs)
-            if node.type != NodeType.ACTION:
-                self.stack.append((node, NodeState.EXITING))
+            self.stack.append((node, NodeState.EXITING))
 
         if node.type == NodeType.ACTION:
-            self.stack.append((node, NodeState.EXITING))
             return node
 
         if node.type == NodeType.AND:
-            if self._is_successful(node):
+            if self._has_successful_children_and(node):
                 return node
-            if self._has_valid_child(node):
-                if (node, NodeState.EXITING) not in self.stack:
-                    self.stack.append((node, NodeState.EXITING))
+            if self._has_valid_children_and(node):
                 for child in reversed(node.children):
+                    # If node is in state UNVISITED, VISITED or FAIL
                     if child.status not in self._closed_statuses():
                         self.stack.append((child, NodeState.ENTERING))
             else:
-                node.status = NodeStatus.FAILED
+                node.status = NodeStatus.FAIL
 
         if node.type == NodeType.OR:
-            if self._is_successful(node):
-                return None
-            if self._is_valid_or(node):
-                if (node, NodeState.EXITING) not in self.stack:
-                    self.stack.append((node, NodeState.EXITING))
+            if self._has_successful_children_or(node):
+                return node
+            if self._has_valid_children_or(node):
                 child = self._select_promising_child(node)
                 self.stack.append((child, NodeState.ENTERING))
             else:
-                node.status = NodeStatus.FAILED
-        return None
+                node.status = NodeStatus.FAIL
+        #return None
+        return node
 
     # Algo 3 from the HPA paper
     def _process_node_exiting(self, node: Node):
         if node.type == NodeType.ACTION:
-            if node.status in {NodeStatus.FAILED, NodeStatus.PRUNED}:
+            if node.status in {NodeStatus.FAIL, NodeStatus.PRUNED}:
                 self.stack.append((node, NodeState.FAILED))
             return
         else:
             node.status = NodeStatus.SUCCESS
 
         if node.type == NodeType.AND:
-            if self._is_successful_and(node):
+            if self._has_successful_children_and(node):
                 if self._check_and_complete(node):
                     node.status = NodeStatus.SUCCESS
                     return
 
-            node.status = NodeStatus.FAILED
+            node.status = NodeStatus.FAIL
             self.stack.append((node, NodeState.FAILED))
 
-        elif node.type == NodeType.OR:
-            if self._is_successful_or(node):
+        if node.type == NodeType.OR:
+            if self._has_successful_children_or(node):
                 node.status = NodeStatus.SUCCESS
-            else:
-                node.status = NodeStatus.FAILED
-                self.stack.append((node, NodeState.FAILED))
+                return
+            
+            node.status = NodeStatus.FAIL
+            self.stack.append((node, NodeState.FAILED))
 
     # Algo 4 from the HPA paper
     def _process_node_failed(self, node: Node):
         if node.type == NodeType.ACTION:
             node.status = NodeStatus.PRUNED
+            #  If a failed ACTION node belongs to an
+            # AND node, the agent deletes all remaining unexecuted siblings (This is what the _propagate_failure function does)
             self._propagate_failure(node)
             return
 
         elif node.type == NodeType.AND:
-            if self._has_success(node) and self._check_and_complete(node):
-                node.status = NodeStatus.SUCCESS
-                return
-
-            if not self._is_valid_and(node):
+            if not self._has_valid_children_and(node):
                 if node.revision_count < self.max_revision_count:
                     revised = self._revise_and(node)
                     self._synchronize_stack()
@@ -172,12 +169,12 @@ class HPA:
                         node.status = NodeStatus.VISITED
                         self.stack.append((node, NodeState.ENTERING))
                 else:
-                    self._prune(node)
+                    node.status = NodeStatus.PRUNED
                     self._synchronize_stack()
                     self._propagate_failure(node)
 
         elif node.type == NodeType.OR:
-            if self._is_valid_or(node):
+            if self._has_valid_children_or(node):
                 node.status = NodeStatus.VISITED
                 self.stack.append((node, NodeState.ENTERING))
                 return
@@ -189,7 +186,7 @@ class HPA:
                     node.status = NodeStatus.VISITED
                     self.stack.append((node, NodeState.ENTERING))
             else:
-                self._prune(node)
+                node.status = NodeStatus.PRUNED
                 self._synchronize_stack()
                 self._propagate_failure(node)
 
@@ -372,11 +369,7 @@ class HPA:
         return retry(self.chat_llm, messages, n_retry=2, parser=parser)
 
     def _select_promising_child(self, node: Node) -> Node:
-        valid_children = [
-            child for child in node.children if child.status not in self._closed_statuses()
-        ]
-        if not valid_children:
-            return node.children[0]
+        valid_children = self._get_valid_children(node)
         return max(valid_children, key=lambda child: child.score or 0.0)
 
     def _describe_local_tree(self, node: Node) -> str:
@@ -433,47 +426,28 @@ class HPA:
         node.revision_count += 1
         return False
 
-    def _prune(self, node: Node):
-        node.status = NodeStatus.PRUNED
-
     def _closed_statuses(self):
-        return {NodeStatus.SUCCESS, NodeStatus.FAILED, NodeStatus.PRUNED}
+        return {NodeStatus.SUCCESS, NodeStatus.DELETED, NodeStatus.PRUNED}
 
-    def _is_successful(self, node: Node) -> bool:
-        return node.status == NodeStatus.SUCCESS
+    def _has_successful_children_and(self, node: Node) -> bool:
+        return all(c.status == NodeStatus.SUCCESS for c in node.children)      
 
-    def _is_successful_and(self, node: Node) -> bool:
-        valid_children = self._valid_children(node)
-        if not valid_children:
-            return False
-        return all(c.status == NodeStatus.SUCCESS for c in valid_children)
-
-    def _is_successful_or(self, node: Node) -> bool:
+    def _has_successful_children_or(self, node: Node) -> bool:
         return any(c.status == NodeStatus.SUCCESS for c in node.children)
 
-    def _has_valid_child(self, node: Node) -> bool:
-        return any(c.status not in {NodeStatus.PRUNED, NodeStatus.DELETED} for c in node.children)
-
-    def _has_success(self, node: Node) -> bool:
-        if node.type == NodeType.AND:
-            return all(c.status == NodeStatus.SUCCESS for c in node.children)
-        if node.type == NodeType.OR:
-            return any(c.status == NodeStatus.SUCCESS for c in node.children)
-        return False
-
-    def _is_valid_and(self, node: Node) -> bool:
+    def _has_valid_children_and(self, node: Node) -> bool:
         return all(c.status not in {NodeStatus.PRUNED, NodeStatus.DELETED} for c in node.children)
 
-    def _is_valid_or(self, node: Node) -> bool:
+    def _has_valid_children_or(self, node: Node) -> bool:
         return any(c.status not in {NodeStatus.PRUNED, NodeStatus.DELETED} for c in node.children)
 
     def _check_and_complete(self, node: Node) -> bool:
-        valid_children = self._valid_children(node)
+        valid_children = self._get_valid_children(node)
         if not valid_children:
             return False
         return all(c.status == NodeStatus.SUCCESS for c in valid_children)
 
-    def _valid_children(self, node: Node) -> list[Node]:
+    def _get_valid_children(self, node: Node) -> list[Node]:
         return [c for c in node.children if c.status not in {NodeStatus.PRUNED, NodeStatus.DELETED}]
 
     def _is_root(self, node: Node) -> bool:
