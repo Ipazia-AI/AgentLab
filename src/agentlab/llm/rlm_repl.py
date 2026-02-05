@@ -12,6 +12,7 @@ TODO: Add RestrictedPython sandboxing before production use.
 """
 
 import io
+import logging
 import re
 import sys
 from typing import Any
@@ -51,13 +52,17 @@ class REPLExecutor:
         code, num_blocks = self._extract_code(response)
 
         if code is None:
+            logging.debug("RLM REPL: no repl/python code blocks found")
             return (
                 "No code block found. Write code in ```repl blocks.\n"
                 "Example:\n```repl\nprint(context['axtree'])\n```"
             )
 
         if not code.strip():
+            logging.debug("RLM REPL: empty code block found (num_blocks=%s)", num_blocks)
             return "Empty code block."
+        if num_blocks > 1:
+            logging.debug("RLM REPL: multiple code blocks found (num_blocks=%s)", num_blocks)
 
         # Capture stdout
         old_stdout = sys.stdout

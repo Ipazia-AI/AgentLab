@@ -35,6 +35,7 @@ from .rlm_parser import is_final, check_for_final_answer
 from .rlm_prompts import REPL_SYSTEM_PROMPT, USER_PROMPT
 from .rlm_repl import REPLError, REPLExecutor
 
+logger = logging.getLogger(__name__)
 
 class RLMError(Exception):
     """Base error for RLM operations."""
@@ -131,6 +132,14 @@ class RLMChatModel(AbstractChatModel):
 
         # Initialize REPL environment
         repl_env = self._build_repl_env(query, context)
+        logger.debug(
+            "RLM init: query_len=%s axtree_len=%s html_len=%s has_error=%s images=%s",
+            len(query),
+            len(context.get("axtree", "")),
+            len(context.get("html", "")),
+            bool(context.get("error")),
+            len(images),
+        )
 
         # Build RLM conversation (system prompt is stable, no arguments)
         system_prompt = REPL_SYSTEM_PROMPT
@@ -155,6 +164,7 @@ class RLMChatModel(AbstractChatModel):
             self._llm_calls += 1
 
             response_text = response_dict.get("content", "")
+            self._log_iteration_response(iteration + 1, response_text)
 
             # Check for FINAL() or FINAL_VAR() at start of line
             if is_final(response_text):
@@ -165,6 +175,12 @@ class RLMChatModel(AbstractChatModel):
                     if "<action>" not in answer:
                         answer = f"<action>\n{answer}\n</action>"
                     return AIMessage(answer)
+                logger.warning(
+                    "RLM FINAL detected but could not resolve answer; "
+                    "iteration=%s response_snippet=%s",
+                    iteration + 1,
+                    self._truncate_text(response_text),
+                )
 
             # Execute code in REPL
             try:
@@ -174,6 +190,8 @@ class RLMChatModel(AbstractChatModel):
             except Exception as e:
                 exec_result = f"Unexpected error: {str(e)}"
                 logging.warning(f"RLM REPL error: {e}")
+
+            self._log_repl_result(iteration + 1, exec_result)
 
             # Add to conversation
             rlm_messages.extend(
@@ -275,6 +293,36 @@ class RLMChatModel(AbstractChatModel):
             "re": re,  # Pre-import re module
         }
 
+    def _truncate_text(self, text: str, limit: int = 500) -> str:
+        if len(text) <= limit:
+            return text
+        return f"{text[:limit]}...[truncated {len(text) - limit} chars]"
+
+    def _log_iteration_response(self, iteration: int, response_text: str) -> None:
+        logger.debug(
+            "RLM iteration %s/%s response_len=%s",
+            iteration,
+            self.max_iterations,
+            len(response_text),
+        )
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(
+                "RLM iteration %s response_snippet=%s",
+                iteration,
+                self._truncate_text(response_text),
+            )
+
+    def _log_repl_result(self, iteration: int, exec_result: str) -> None:
+        if exec_result.startswith("No code block found"):
+            logger.warning("RLM iteration %s: no repl code block found", iteration)
+        elif exec_result.startswith("Empty code block"):
+            logger.warning("RLM iteration %s: empty repl code block", iteration)
+        elif exec_result.startswith("Error:"):
+            logger.warning(
+                "RLM iteration %s repl error: %s",
+                iteration,
+                self._truncate_text(exec_result),
+            )
     def _make_llm_query_fn(self):
         """
         Create the llm_query function for REPL environment.

@@ -37,7 +37,7 @@ def find_final_answer(text: str) -> tuple[str, str] | None:
     Returns (type, content) or None.
     """
     # Single regex for both patterns
-    match = re.search(r"^\s*(FINAL(?:_VAR)?)\(", text, re.MULTILINE)
+    match = re.search(r"^\s*(FINAL(?:_VAR)?)\s*\(", text, re.MULTILINE)
     if match:
         content = _extract_balanced(text, match.end())
         if content is not None:

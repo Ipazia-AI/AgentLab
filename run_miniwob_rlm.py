@@ -36,14 +36,14 @@ load_dotenv(find_dotenv())
 # Base model to wrap with RLM
 # You can use any provider: OpenAI, Anthropic, LiteLLM, etc.
 base_model_args = OpenRouterModelArgs(
-    model_name="openai/gpt-5.2",
+    model_name="openai/gpt-5-mini",
     max_new_tokens=None,
     temperature=None,
 )
 
 # Optional: Use a cheaper model for recursive sub-calls
 recursive_model_args = OpenRouterModelArgs(
-    model_name="openai/gpt-5.2-chat",
+    model_name="openai/gpt-5-mini",
     max_new_tokens=None,
     temperature=None,
 )
@@ -54,7 +54,7 @@ rlm_model_args = RLMModelArgs(
     inner_model_args=base_model_args,
     recursive_model_args=recursive_model_args,  # Optional: cheaper model for sub-calls
     max_depth=5,  # Maximum recursion depth
-    max_iterations=10,  # Maximum REPL iterations per call
+    max_iterations=30,  # Maximum REPL iterations per call
     max_output_chars=3000,  # Truncate long REPL outputs
 )
 
@@ -96,11 +96,11 @@ benchmark_name = "miniwob"
 benchmark = bgym.DEFAULT_BENCHMARKS[benchmark_name](n_repeats=1)
 
 # Specifically target a simple task for testing
-# try:
-#     benchmark = benchmark.subset_from_glob("task_name", "miniwob.click-dialog")
-# except (AttributeError, Exception) as e:
-#     logger.warning(f"Could not filter benchmark: {e}. Running full benchmark if needed.")
-
+try:
+    benchmark = benchmark.subset_from_regexp("task_name", "miniwob.click")
+except (AttributeError, Exception) as e:
+    logger.warning(f"Could not filter benchmark: {e}. Running full benchmark if needed.")
+print(benchmark)
 # 5. Run Study
 n_jobs = 4  # Sequential execution for debugging
 parallel_backend = "ray"
