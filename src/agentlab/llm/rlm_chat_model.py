@@ -31,12 +31,8 @@ from typing import Any
 
 from .base_api import AbstractChatModel, BaseModelArgs
 from .llm_utils import AIMessage
-from .rlm_parser import is_final, parse_response
-from .rlm_prompt_parser import (
-    build_context_dict,
-    parse_agent_prompt,
-)
-from .rlm_prompts import build_system_prompt
+from .rlm_parser import is_final, check_for_final_answer
+from .rlm_prompts import REPL_SYSTEM_PROMPT, USER_PROMPT
 from .rlm_repl import REPLError, REPLExecutor
 
 
@@ -99,6 +95,10 @@ class RLMChatModel(AbstractChatModel):
 
         self.repl = REPLExecutor(max_output_chars=max_output_chars)
 
+        # Observation dict and action_set set by GenericAgent before each call
+        self.obs: dict | None = None
+        self.action_set = None
+
         # Stats tracking
         self._llm_calls = 0
         self._iterations = 0
@@ -126,21 +126,21 @@ class RLMChatModel(AbstractChatModel):
         if self._current_depth >= self.max_depth:
             raise MaxDepthError(f"Max recursion depth ({self.max_depth}) exceeded")
 
-        # Extract query and context from messages
-        query, context, images, action_format = self._extract_query_and_context(messages)
-
-        # Get context size info for prompt
-        context_info = {k: len(v) for k, v in context.items() if v}
+        # Extract query and context from self.obs (set by GenericAgent)
+        query, context, images = self._extract_query_and_context(messages)
 
         # Initialize REPL environment
         repl_env = self._build_repl_env(query, context)
 
-        # Build RLM conversation with action format
-        system_prompt = build_system_prompt(context_info, action_format, self._current_depth)
+        # Build RLM conversation (system prompt is stable, no arguments)
+        system_prompt = REPL_SYSTEM_PROMPT
+        # This task_info is needed as information that the model needs to know about the existence of bids in the AXTree contained in the context variable.
+        task_info = "Note: [bid] is the unique alpha-numeric identifier at the beginning of lines for each element in the AXTree. Always use bid to refer to elements in your actions. The axtree and other important information are provided in the context variable which is a dictionary with the following keys: context['axtree'] (accessibility tree), context['html'], context['goal'], context['error'], you MUST look through it at least once before answering your query."
         rlm_messages: list[dict] = [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": query},
+            {"role": "user", "content": task_info + "\n\n" + query + "\n\n" + USER_PROMPT},
         ]
+        
 
         # If there are images, add them to the first user message
         if images:
@@ -156,10 +156,14 @@ class RLMChatModel(AbstractChatModel):
 
             response_text = response_dict.get("content", "")
 
-            # Check for FINAL() or FINAL_VAR()
+            # Check for FINAL() or FINAL_VAR() at start of line
             if is_final(response_text):
-                answer = parse_response(response_text, repl_env)
+                answer = check_for_final_answer(response_text, repl_env)
                 if answer is not None:
+                    # Wrap in <action> tags if not already present
+                    # (GenericAgent's parser expects <action>...</action>)
+                    if "<action>" not in answer:
+                        answer = f"<action>\n{answer}\n</action>"
                     return AIMessage(answer)
 
             # Execute code in REPL
@@ -172,8 +176,12 @@ class RLMChatModel(AbstractChatModel):
                 logging.warning(f"RLM REPL error: {e}")
 
             # Add to conversation
-            rlm_messages.append({"role": "assistant", "content": response_text})
-            rlm_messages.append({"role": "user", "content": exec_result})
+            rlm_messages.extend(
+                [
+                    {"role": "assistant", "content": response_text},
+                    {"role": "user", "content": exec_result}
+                ]
+            )
 
         raise MaxIterationsError(
             f"Max iterations ({self.max_iterations}) exceeded without FINAL()"
@@ -201,35 +209,36 @@ class RLMChatModel(AbstractChatModel):
 
     def _extract_query_and_context(
         self, messages: list[dict]
-    ) -> tuple[str, dict[str, Any], list[dict], str]:
-        """
-        Extract query and context from GenericAgent message list.
+    ) -> tuple[str, dict[str, Any], list[dict]]:
+        """Build query and context from self.obs (set by GenericAgent)."""
+        obs = self.obs
 
-        Uses the prompt parser to correctly separate:
-        - Task (short query) - what to do
-        - Observations (HTML, AXTree, etc.) - externalized to REPL context dict
-        - History - externalized to REPL context dict
-        - Action format - kept visible in RLM prompt
+        # Goal: assume standard structure from GenericAgent
+        goal = obs["goal_object"][0]["text"]
 
-        Args:
-            messages: List of message dicts
+        # Action format from action_set (set by GenericAgent)
+        action_format = ""
+        if self.action_set is not None:
+            action_format = f"# Action space:\n{self.action_set.describe()}"
 
-        Returns:
-            Tuple of (query, context_dict, images, action_format)
-        """
-        # Parse the GenericAgent prompt structure
-        parsed = parse_agent_prompt(messages)
+        # Get human_content for image extraction
+        human_content = messages[-1].get("content", "")
 
-        # Short query - the actual task
-        query = parsed.task
+        # Context dict for REPL (large items for exploration)
+        context = {
+            "axtree": obs.get("axtree_txt", ""),
+            "html": obs.get("pruned_html", ""),
+            "goal": goal,
+            "error": obs.get("last_action_error", ""),
+        }
 
-        # Context dict for REPL exploration (NOT a string!)
-        context = build_context_dict(parsed)
+        # Images: assume list content format if present
+        images = []
+        if isinstance(human_content, list):
+            images = [item for item in human_content if item.get("type") == "image_url"]
 
-        # Action format to keep visible in prompt
-        action_format = parsed.action_format
-
-        return query, context, parsed.images, action_format
+        query = f"Task: {goal}\n\n{action_format}"
+        return query, context, images
 
     def _add_images_to_message(
         self, message: dict, images: list[dict]
@@ -250,7 +259,7 @@ class RLMChatModel(AbstractChatModel):
 
     def _build_repl_env(self, query: str, context: dict[str, Any]) -> dict[str, Any]:
         """
-        Build REPL environment with context dict, query, and recursive_llm function.
+        Build REPL environment with context dict, query, and llm_query function.
 
         Args:
             query: The user query (short task description)
@@ -262,52 +271,48 @@ class RLMChatModel(AbstractChatModel):
         return {
             "context": context,  # Dict with axtree, html, history, etc.
             "query": query,
-            "recursive_llm": self._make_recursive_fn(),
+            "llm_query": self._make_llm_query_fn(),
             "re": re,  # Pre-import re module
         }
 
-    def _make_recursive_fn(self):
+    def _make_llm_query_fn(self):
         """
-        Create the recursive_llm function for REPL environment.
+        Create the llm_query function for REPL environment.
+
+        This provides a simple interface to query the recursive LLM directly,
+        similar to the original RLM implementation's Sub_RLM.
 
         Returns:
-            A sync function that calls the recursive_model
+            A function that takes a prompt string and returns the LLM response
         """
 
-        def recursive_llm(sub_query: str, sub_context: str) -> str:
+        def llm_query(prompt: str) -> str:
             """
-            Recursively process sub-context with another LLM call.
+            Query the LLM with the given prompt.
+
+            This is a direct LLM call without REPL capabilities - useful for
+            summarizing chunks, answering questions about sub-contexts, etc.
 
             Args:
-                sub_query: Query for the sub-context
-                sub_context: The sub-context to process
+                prompt: The prompt to send to the LLM
 
             Returns:
-                Answer from the recursive call
+                The LLM's response as a string
             """
             if self._current_depth + 1 >= self.max_depth:
                 return f"Max recursion depth ({self.max_depth}) reached"
 
-            # Create a sub-RLM with increased depth
-            sub_rlm = RLMChatModel(
-                inner_model=self.recursive_model,
-                recursive_model=self.recursive_model,
-                max_depth=self.max_depth,
-                max_iterations=self.max_iterations,
-                max_output_chars=self.max_output_chars,
-                _current_depth=self._current_depth + 1,
-            )
-
-            # Build simple messages for the sub-call
-            messages = [{"role": "user", "content": f"{sub_query}\n\nContext:\n{sub_context}"}]
+            # Build simple messages for direct LLM call
+            messages = [{"role": "user", "content": prompt}]
 
             try:
-                result = sub_rlm(messages)
-                return result.get("content", "")
+                # Call the recursive model directly (not wrapped in RLM)
+                response = self.recursive_model(messages)
+                return response.get("content", "")
             except Exception as e:
-                return f"Recursive call error: {str(e)}"
+                return f"LLM query error: {str(e)}"
 
-        return recursive_llm
+        return llm_query
 
 
 @dataclass

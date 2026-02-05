@@ -1,101 +1,66 @@
 """
 Parse FINAL() and FINAL_VAR() statements from LLM responses.
 
-This module provides functions to detect and extract the final answer
-from an RLM's response. The model signals completion by using
-FINAL("answer") or FINAL_VAR(variable_name).
-
 Based on the RLM paper (arXiv:2512.24601) termination signal patterns.
+FINAL/FINAL_VAR must be at the start of a line (with optional whitespace).
 """
 
 import re
 from typing import Any
 
 
-def extract_final(response: str) -> str | None:
-    """
-    Extract answer from FINAL() statement.
-
-    Args:
-        response: LLM response text
-
-    Returns:
-        Extracted answer or None if not found
-    """
-    # Look for FINAL("answer") or FINAL('answer')
-    patterns = [
-        r'FINAL\s*\(\s*"""(.*)"""',  # FINAL("""answer""") - triple double quotes
-        r"FINAL\s*\(\s*'''(.*)'''",  # FINAL('''answer''') - triple single quotes
-        r'FINAL\s*\(\s*"([^"]*)"',  # FINAL("answer") - double quotes
-        r"FINAL\s*\(\s*'([^']*)'",  # FINAL('answer') - single quotes
-    ]
-
-    for pattern in patterns:
-        match = re.search(pattern, response, re.DOTALL)
-        if match:
-            return match.group(1).strip()
-
+def _extract_balanced(text: str, start: int) -> str | None:
+    """Extract content with balanced parens, respecting quotes."""
+    depth, i, n = 1, start, len(text)
+    in_quote = None
+    
+    while i < n:
+        c = text[i]
+        if in_quote:
+            if c == in_quote and text[i-1:i] != "\\":
+                in_quote = None
+        elif c in "\"'":
+            in_quote = c
+        elif c == "(":
+            depth += 1
+        elif c == ")":
+            depth -= 1
+            if depth == 0:
+                return text[start:i]
+        i += 1
     return None
 
 
-def extract_final_var(response: str, env: dict[str, Any]) -> str | None:
+def find_final_answer(text: str) -> tuple[str, str] | None:
     """
-    Extract answer from FINAL_VAR() statement.
-
-    Args:
-        response: LLM response text
-        env: REPL environment with variables
-
-    Returns:
-        Variable value as string or None if not found
+    Find FINAL(...) or FINAL_VAR(...) at start of line.
+    Returns (type, content) or None.
     """
-    # Look for FINAL_VAR(var_name)
-    match = re.search(r"FINAL_VAR\s*\(\s*(\w+)\s*\)", response)
-    if not match:
+    # Single regex for both patterns
+    match = re.search(r"^\s*(FINAL(?:_VAR)?)\(", text, re.MULTILINE)
+    if match:
+        content = _extract_balanced(text, match.end())
+        if content is not None:
+            return (match.group(1), content.strip())
+    return None
+
+
+def check_for_final_answer(response: str, repl_env: dict[str, Any]) -> str | None:
+    """Extract final answer, resolving FINAL_VAR from repl_env if needed."""
+    result = find_final_answer(response)
+    if not result:
         return None
 
-    var_name = match.group(1)
-
-    # Get variable from environment
-    if var_name in env:
-        value = env[var_name]
-        return str(value)
-
-    return None
+    answer_type, content = result
+    
+    if answer_type == "FINAL":
+        return content
+    
+    # FINAL_VAR: lookup variable in environment
+    var_name = content.strip().strip("\"'")
+    return str(repl_env[var_name]) if var_name in repl_env else None
 
 
 def is_final(response: str) -> bool:
-    """
-    Check if response contains FINAL() or FINAL_VAR().
-
-    Args:
-        response: LLM response text
-
-    Returns:
-        True if response contains final statement
-    """
-    return "FINAL(" in response or "FINAL_VAR(" in response
-
-
-def parse_response(response: str, env: dict[str, Any]) -> str | None:
-    """
-    Parse response for any final statement.
-
-    Args:
-        response: LLM response text
-        env: REPL environment
-
-    Returns:
-        Final answer or None
-    """
-    # Try FINAL() first
-    answer = extract_final(response)
-    if answer is not None:
-        return answer
-
-    # Try FINAL_VAR()
-    answer = extract_final_var(response, env)
-    if answer is not None:
-        return answer
-
-    return None
+    """Check if response contains FINAL() or FINAL_VAR() at start of line."""
+    return find_final_answer(response) is not None

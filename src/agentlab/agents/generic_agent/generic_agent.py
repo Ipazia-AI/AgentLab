@@ -125,6 +125,9 @@ class GenericAgent(Agent):
             # cause it to be too long
 
             chat_messages = Discussion([system_prompt, human_prompt])
+            # Pass raw obs and action_set to chat_llm for RLM context building
+            self.chat_llm.obs = obs
+            self.chat_llm.action_set = self.action_set
             ans_dict = retry(
                 self.chat_llm,
                 chat_messages,

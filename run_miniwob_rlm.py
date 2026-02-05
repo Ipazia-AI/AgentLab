@@ -92,21 +92,21 @@ agent_args = GenericAgentArgs(
 )
 
 # 4. Setup Benchmark
-benchmark_name = "miniwob_tiny_test"
+benchmark_name = "miniwob"
 benchmark = bgym.DEFAULT_BENCHMARKS[benchmark_name](n_repeats=1)
 
 # Specifically target a simple task for testing
-try:
-    benchmark = benchmark.subset_from_glob("task_name", "miniwob.click-dialog")
-except (AttributeError, Exception) as e:
-    logger.warning(f"Could not filter benchmark: {e}. Running full benchmark if needed.")
+# try:
+#     benchmark = benchmark.subset_from_glob("task_name", "miniwob.click-dialog")
+# except (AttributeError, Exception) as e:
+#     logger.warning(f"Could not filter benchmark: {e}. Running full benchmark if needed.")
 
 # 5. Run Study
-n_jobs = 1  # Sequential execution for debugging
-parallel_backend = "sequential"
+n_jobs = 4  # Sequential execution for debugging
+parallel_backend = "ray"
 
 if __name__ == "__main__":
-    study = Study([agent_args], benchmark, logging_level_stdout=logging.INFO)
+    study = Study([agent_args], benchmark, logging_level_stdout=logging.INFO, logging_level=logging.INFO)
 
     print(f"Starting Study on {benchmark_name} with GenericAgent + RLM...")
     print(f"  Base model: {base_model_args.model_name}")
