@@ -6,6 +6,7 @@ from browsergym.core.action.highlevel import HighLevelActionSet
 from agentlab.agents.agent_args import AgentArgs
 from agentlab.agents.dynamic_prompting import ObsFlags, make_obs_preprocessor
 from agentlab.agents.generic_agent.generic_agent import GenericAgent, GenericAgentArgs
+from agentlab.agents.generic_agent.generic_agent_prompt import GenericPromptFlags
 from agentlab.llm.base_api import BaseModelArgs
 from agentlab.llm.tracking import cost_tracker_decorator
 
@@ -18,7 +19,6 @@ class HPAAgentArgs(GenericAgentArgs):
     chat_model_args: BaseModelArgs | None = None
     budget: int = 1000
     max_revision_count: int = 3
-    action_subsets: tuple[str, ...] = ("workarena",)
     multiaction: bool = False
 
     def __post_init__(self):
@@ -30,9 +30,9 @@ class HPAAgentArgs(GenericAgentArgs):
     def make_agent(self) -> GenericAgent:
         return HPAAgent(
             chat_model_args=self.chat_model_args,
+            flags=self.flags,
             budget=self.budget,
             max_revision_count=self.max_revision_count,
-            action_subsets=self.action_subsets,
             multiaction=self.multiaction,
         )
 
@@ -51,18 +51,19 @@ class HPAAgent(GenericAgent):
     def __init__(
         self,
         chat_model_args: BaseModelArgs | None,
+        flags: GenericPromptFlags,
         budget: int,
         max_revision_count: int,
-        action_subsets: tuple[str, ...],
         multiaction: bool,
     ):
         self.chat_llm = chat_model_args.make_model() if chat_model_args is not None else None
-        self.action_set = HighLevelActionSet(action_subsets, multiaction=multiaction)
-
-        self._obs_preprocessor = make_obs_preprocessor(ObsFlags())
+        self.flags = flags
+        self.action_set = self.flags.action.action_set.make_action_set()
+        self._obs_preprocessor = make_obs_preprocessor(self.flags.obs)
 
         self.hpa = HPA(
             chat_llm=self.chat_llm,
+            action_flags=self.flags.action,
             action_set=self.action_set,
             budget=budget,
             max_revision_count=max_revision_count,

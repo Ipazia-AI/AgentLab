@@ -1,8 +1,9 @@
 from pathlib import Path
 
-from bgym import DEFAULT_BENCHMARKS
+from bgym import DEFAULT_BENCHMARKS, HighLevelActionSetArgs
 from dotenv import load_dotenv
 
+import agentlab.agents.dynamic_prompting as dp
 from agentlab.agents.generic_agent import AGENT_4o_MINI
 from agentlab.agents.structured_agent.hpa_agent import HPAAgentArgs
 from agentlab.experiments.study import Study
@@ -13,11 +14,18 @@ load_dotenv(project_dir.joinpath(".env"), override=False)
 
 
 agent_config = HPAAgentArgs(
-    action_subsets=("workarena",),
     multiaction=False,
     chat_model_args=AGENT_4o_MINI.chat_model_args,
     flags=AGENT_4o_MINI.flags,
     max_retry=AGENT_4o_MINI.max_retry,
+)
+agent_config.flags.action = dp.ActionFlags(
+    action_set=HighLevelActionSetArgs(
+        subsets=["bid", "nav", "tab", "workarena", "workarena++"],
+        multiaction=False,
+    ),
+    long_description=False,
+    individual_examples=False,
 )
 
 agent_configs = [agent_config]

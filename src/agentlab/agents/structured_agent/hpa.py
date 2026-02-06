@@ -2,6 +2,9 @@ import json
 import logging
 from typing import List, Tuple
 
+from bgym import AbstractActionSet
+
+from agentlab.agents.dynamic_prompting import ActionFlags
 from agentlab.llm.llm_utils import (
     Discussion,
     HumanMessage,
@@ -23,11 +26,13 @@ class HPA:
     def __init__(
         self,
         chat_llm,
-        action_set,
+        action_flags: ActionFlags,
+        action_set: AbstractActionSet,
         budget: int = 1000,
         max_revision_count: int = 3,
     ):
         self.chat_llm = chat_llm
+        self.action_flags = action_flags
         self.action_set = action_set
         self.budget = budget  # remove
         self.max_revision_count = max_revision_count
@@ -91,7 +96,7 @@ class HPA:
         if node.parent and node.parent.type == NodeType.OR:
             # TODO: The role of this function is not clear, let's check it later what it is supposed to do.
             self._rollback_context(node.parent)
-        
+
         # TODO: The role of this function is not clear, let's check it later what it is supposed to do.
         self._set_context(node)
         node.execution_count += 1
@@ -122,7 +127,7 @@ class HPA:
                 self.stack.append((child, NodeState.ENTERING))
             else:
                 node.status = NodeStatus.FAIL
-        #return None
+        # return None
         return node
 
     # Algo 3 from the HPA paper
@@ -147,7 +152,7 @@ class HPA:
             if self._has_successful_children_or(node):
                 node.status = NodeStatus.SUCCESS
                 return
-            
+
             node.status = NodeStatus.FAIL
             self.stack.append((node, NodeState.FAILED))
 
@@ -297,7 +302,7 @@ class HPA:
         observation: str,
         node: Node,
     ) -> dict:
-        system_message = NodeExpansionPrompt.system_message
+        system_message = NodeExpansionPrompt(self.action_set, self.action_flags).system_message()
         user_message = NodeExpansionPrompt.user_message(
             task_description=task_description,
             task_constraints=task_constraints or None,
@@ -430,7 +435,7 @@ class HPA:
         return {NodeStatus.SUCCESS, NodeStatus.DELETED, NodeStatus.PRUNED}
 
     def _has_successful_children_and(self, node: Node) -> bool:
-        return all(c.status == NodeStatus.SUCCESS for c in node.children)      
+        return all(c.status == NodeStatus.SUCCESS for c in node.children)
 
     def _has_successful_children_or(self, node: Node) -> bool:
         return any(c.status == NodeStatus.SUCCESS for c in node.children)

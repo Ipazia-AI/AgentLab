@@ -2,6 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from bgym import AbstractActionSet
+
+from agentlab.agents import dynamic_prompting as dp
+
 
 def _normalize_block(value) -> str:
     if value is None:
@@ -183,9 +187,18 @@ Example:
         )
 
 
-@dataclass(frozen=True)
+@dataclass(init=False)
 class NodeExpansionPrompt:
-    system_message: str = """\
+    action_prompt: str
+
+    def __init__(self, action_set: AbstractActionSet, action_flags: dp.ActionFlags) -> None:
+        self.action_prompt = dp.ActionPrompt(
+            action_set,
+            action_flags=action_flags,
+        ).prompt
+
+    def system_message(self) -> str:
+        return f"""\
 SYSTEM MESSAGE:
 
 You are an efficient logical (AND/OR) tree constructing agent specialized in web-browsing tasks. You solve complex problems using AND/OR planning trees.
@@ -212,25 +225,7 @@ Node status indicators:
 - SUCCESS
 - FAIL
 
-List of Browser Actions:
-- scroll
-- fill
-- select_option
-- click
-- dblclick
-- hover
-- press
-- focus
-- clear
-- drag_and_drop
-- tab_focus
-- new_tab
-- tab_close
-- go_back
-- go_forward
-- goto
-- send_msg_to_user
-- report_infeasible
+{self.action_prompt}
 
 Your task for the given node:
 1. Determine whether the node is an AND node, an OR node, or an ACTION node.
@@ -253,16 +248,16 @@ Important Rules:
 Output must be valid JSON using one of the following formats:
 
 Format 1 (node type ACTION):
-{
+{{
   "node_id": "ID of the node here",
   "node_description": "Describe what the atomic action does",
   "node_type": "ACTION",
   "expansion": "Exact atomic action from the list of browser actions",
   "reasoning": "Brief justification explaining why the node is classified as ACTION"
-}
+}}
 
 Format 2 (node type AND or OR):
-{
+{{
   "node_id": "ID of the node here",
   "node_description": "Description of the node here",
   "node_type": "AND or OR",
@@ -271,7 +266,7 @@ Format 2 (node type AND or OR):
     "Second subgoal or alternative strategy"
   ],
   "reasoning": "Brief justification explaining why the node is classified as AND or OR"
-}
+}}
 """
 
     @staticmethod
