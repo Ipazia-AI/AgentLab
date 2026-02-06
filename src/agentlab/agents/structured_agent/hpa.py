@@ -412,24 +412,6 @@ class HPA:
             self.action_history.append(node.text)
 
     def _propagate_failure(self, node: Node):
-        """
-        Handle failure bookkeeping when a node (typically an ACTION) is pruned/failed.
-
-        The HPA paper text (Sec. 4.3) states that if a failed ACTION node belongs to an AND node,
-        the agent deletes all remaining *unexecuted* siblings because the conjunctive objective can
-        no longer be satisfied.
-
-        We implement that semantics by:
-        - marking later siblings in the AND sequence as DELETED (and cascading to descendants)
-        - removing DELETED nodes from the DFS stack to keep traversal consistent
-
-        Notes:
-        - We do NOT mark ancestors as PRUNED here; ancestor repair/pruning is handled by the
-          FAILED-state processing logic.
-        - For OR parents, failure of one child does not invalidate other alternatives, so no deletion
-          occurs here.
-        """
-
         parent = node.parent
         if parent is None:
             return
@@ -452,10 +434,9 @@ class HPA:
             # Ensure the AND node is treated as failed (it may later be repaired/pruned).
             if parent.status not in {NodeStatus.PRUNED, NodeStatus.DELETED}:
                 parent.status = NodeStatus.FAIL
-
-            # Remove any now-deleted nodes from the frontier.
                 
         elif parent.type == NodeType.OR:
+            node.status = NodeStatus.DELETED
             deleted_ids.add(node.id)
             mark_deleted_subtree(node, deleted_ids)
                 
