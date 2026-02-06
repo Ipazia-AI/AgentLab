@@ -12,6 +12,7 @@ source = { editable = "." }
 dependencies = [
     { name = "anthropic" },
     { name = "browsergym" },
+    { name = "browsergym-workarena" },
     { name = "contexttimer" },
     { name = "dask" },
     { name = "distributed" },
@@ -63,6 +64,7 @@ dev = [
 requires-dist = [
     { name = "anthropic", specifier = ">=0.62.0" },
     { name = "browsergym", specifier = ">=0.7.1" },
+    { name = "browsergym-workarena", specifier = ">=0.5.2" },
     { name = "contexttimer" },
     { name = "dask" },
     { name = "distributed" },
@@ -501,20 +503,21 @@ wheels = [
 
 [[package]]
 name = "browsergym-workarena"
-version = "0.4.3"
+version = "0.5.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "browsergym-core" },
     { name = "english-words" },
     { name = "faker" },
+    { name = "huggingface-hub" },
     { name = "numpy" },
     { name = "requests" },
     { name = "tenacity" },
     { name = "tqdm" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/92/0e/462b9c4a4b87d0a79552a0b51007b763bcd20fe509be472eb1371b63709e/browsergym_workarena-0.4.3.tar.gz", hash = "sha256:154db5fb750443a8a7266021ac09ea311258dbfc7116b80ad139f7500832dc18", size = 6607433, upload-time = "2025-07-15T19:25:10.633Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/37/d6/a3949c18d52ba8c5100b85d79b13a57dcee0d84f578738fb349e398a68ae/browsergym_workarena-0.5.3.tar.gz", hash = "sha256:40f643e23ece3f57e89bc66154843d92d5f7c391d793c06df8da2a82f0a143a6", size = 6618841, upload-time = "2026-02-03T15:36:31.271Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/35/09/e750e4660f988c6379f4e9ba6aecee41522337665660016405c08ba965f3/browsergym_workarena-0.4.3-py3-none-any.whl", hash = "sha256:eb97415abc23a6ab1394599763d9fa1177d654d684e63472eb26cd565fbbf550", size = 6779956, upload-time = "2025-07-15T19:25:08.571Z" },
+    { url = "https://files.pythonhosted.org/packages/70/5b/518088566572b6cbc28b8782041ba015c02dd04dcbfcfcd4844556ab1500/browsergym_workarena-0.5.3-py3-none-any.whl", hash = "sha256:eb0bdb58598f5e8aeb8b9f01ac3a68dc26d477e3067f01bb56f640a1016e81a5", size = 6786780, upload-time = "2026-02-03T15:36:29.671Z" },
 ]
 
 [[package]]

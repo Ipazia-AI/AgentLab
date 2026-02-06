@@ -53,6 +53,7 @@ dependencies = [
     "litellm>=1.75.3",
     "python-dotenv>=1.1.1",
     "restrictedpython>=7.0",
+    "browsergym-workarena>=0.5.2"
 ]
 
 [project.optional-dependencies]

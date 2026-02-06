@@ -13,7 +13,6 @@ from pathlib import Path
 import bgym
 from bgym import HighLevelActionSetArgs
 from dotenv import find_dotenv, load_dotenv
-from numpy import True_
 
 from agentlab.agents.dynamic_prompting import ActionFlags, ObsFlags
 from agentlab.agents.generic_agent.generic_agent import GenericAgentArgs
@@ -29,8 +28,8 @@ logger = logging.getLogger(__name__)
 
 # 2. Configure the models
 # Ensure MiniWob assets and MINIWOB_URL are set
-project_root = Path(__file__).resolve().parent
-ensure_benchmark("miniwob", project_root=project_root)
+# project_root = Path(__file__).resolve().parent
+# ensure_benchmark("workarena_l1", project_root=project_root)
 load_dotenv(find_dotenv())
 
 # Base model to wrap with RLM
@@ -61,15 +60,15 @@ rlm_model_args = RLMModelArgs(
 # Use standard flags for MiniWob
 flags = GenericPromptFlags(
     obs=ObsFlags(
-        use_html=False,
+        use_html=True,
         use_ax_tree=True,  # Use Accessibility Tree
         use_focused_element=True,
         use_error_logs=False,
-        use_history=False,
-        use_past_error_logs=False,
-        use_action_history=False,
-        use_think_history=False,
-        use_diff=False,
+        use_history=True,
+        use_past_error_logs=True,
+        use_action_history=True,
+        use_think_history=True,
+        use_diff=True,
         use_screenshot=False,
     ),
     use_abstract_example=False,
@@ -92,17 +91,17 @@ agent_args = GenericAgentArgs(
 )
 
 # 4. Setup Benchmark
-benchmark_name = "workarena"
-benchmark = bgym.DEFAULT_BENCHMARKS[benchmark_name](n_repeats=1)
+benchmark_name = "workarena_l1"
+benchmark = bgym.DEFAULT_BENCHMARKS[benchmark_name](n_repeats=10)
 
 # Specifically target a simple task for testing
 try:
-    benchmark = benchmark.subset_from_regexp("task_name", "miniwob.click")
+    benchmark = benchmark.subset_from_regexp("task_name", "workarena.servicenow.order-apple-watch")
 except (AttributeError, Exception) as e:
     logger.warning(f"Could not filter benchmark: {e}. Running full benchmark if needed.")
 print(benchmark)
 # 5. Run Study
-n_jobs = 4  # Sequential execution for debugging
+n_jobs = 5  # Sequential execution for debugging
 parallel_backend = "ray"
 
 if __name__ == "__main__":

@@ -31,7 +31,7 @@ from typing import Any
 
 from .base_api import AbstractChatModel, BaseModelArgs
 from .llm_utils import AIMessage
-from .rlm_parser import is_final, check_for_final_answer
+from .rlm_parser import check_for_final_answer, is_final
 from .rlm_prompts import REPL_SYSTEM_PROMPT, USER_PROMPT
 from .rlm_repl import REPLError, REPLExecutor
 
@@ -142,14 +142,12 @@ class RLMChatModel(AbstractChatModel):
         )
 
         # Build RLM conversation (system prompt is stable, no arguments)
-        system_prompt = REPL_SYSTEM_PROMPT
         # This task_info is needed as information that the model needs to know about the existence of bids in the AXTree contained in the context variable.
         task_info = "Note: [bid] is the unique alpha-numeric identifier at the beginning of lines for each element in the AXTree. Always use bid to refer to elements in your actions. The axtree and other important information are provided in the context variable which is a dictionary with the following keys: context['axtree'] (accessibility tree), context['html'], context['goal'], context['error'], you MUST look through it at least once before answering your query."
         rlm_messages: list[dict] = [
-            {"role": "system", "content": system_prompt},
+            {"role": "system", "content": REPL_SYSTEM_PROMPT},
             {"role": "user", "content": task_info + "\n\n" + query + "\n\n" + USER_PROMPT},
         ]
-        
 
         # If there are images, add them to the first user message
         if images:

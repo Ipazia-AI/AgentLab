@@ -25,6 +25,17 @@
             "env": {
                 "AGENTLAB_DEBUG": "1"
             }
+        },
+        {
+            "name": "Run Workarena L1 RLM",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "run_workarenal1_rlm.py",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "env": {
+                "AGENTLAB_DEBUG": "1"
+            }
         }
     ]
 }
