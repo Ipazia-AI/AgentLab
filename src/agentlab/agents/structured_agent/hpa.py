@@ -166,17 +166,16 @@ class HPA:
             return
 
         elif node.type == NodeType.AND:
-            if not self._has_valid_children_and(node):
-                if node.revision_count < self.max_revision_count:
-                    revised = self._revise_and(node)
-                    self._synchronize_stack()
-                    if revised:
-                        node.status = NodeStatus.VISITED
-                        self.stack.append((node, NodeState.ENTERING))
-                else:
-                    node.status = NodeStatus.PRUNED
-                    self._synchronize_stack()
-                    self._propagate_failure(node)
+            if not self._has_valid_children_and(node) and node.revision_count < self.max_revision_count:
+                revised = self._revise_and(node)
+                #self._synchronize_stack()
+                if revised:
+                    node.status = NodeStatus.VISITED
+                    self.stack.append((node, NodeState.ENTERING))
+            else:
+                node.status = NodeStatus.PRUNED
+                # self._synchronize_stack()
+                self._propagate_failure(node)
 
         elif node.type == NodeType.OR:
             if self._has_valid_children_or(node):
@@ -186,13 +185,13 @@ class HPA:
 
             if node.revision_count < self.max_revision_count:
                 revised = self._revise_or(node)
-                self._synchronize_stack()
+                #self._synchronize_stack()
                 if revised:
                     node.status = NodeStatus.VISITED
                     self.stack.append((node, NodeState.ENTERING))
             else:
                 node.status = NodeStatus.PRUNED
-                self._synchronize_stack()
+                # self._synchronize_stack()
                 self._propagate_failure(node)
 
     def _expand_node(self, node: Node, goal: str | None, obs: dict) -> Node:
@@ -418,16 +417,77 @@ class HPA:
             self.action_history.append(node.text)
 
     def _propagate_failure(self, node: Node):
-        pass
+        """
+        Handle failure bookkeeping when a node (typically an ACTION) is pruned/failed.
 
-    def _synchronize_stack(self):
-        pass
+        The HPA paper text (Sec. 4.3) states that if a failed ACTION node belongs to an AND node,
+        the agent deletes all remaining *unexecuted* siblings because the conjunctive objective can
+        no longer be satisfied.
+
+        We implement that semantics by:
+        - marking later siblings in the AND sequence as DELETED (and cascading to descendants)
+        - removing DELETED nodes from the DFS stack to keep traversal consistent
+
+        Notes:
+        - We do NOT mark ancestors as PRUNED here; ancestor repair/pruning is handled by the
+          FAILED-state processing logic.
+        - For OR parents, failure of one child does not invalidate other alternatives, so no deletion
+          occurs here.
+        """
+
+        parent = node.parent
+        if parent is None:
+            return
+
+        def mark_deleted_subtree(n: Node, deleted_ids: set):
+            if n.status == NodeStatus.DELETED:
+                deleted_ids.add(n.id)
+            else:
+                n.status = NodeStatus.DELETED
+                deleted_ids.add(n.id)
+            for c in getattr(n, "children", []) or []:
+                mark_deleted_subtree(c, deleted_ids)
+        deleted_ids: set = set()
+        # If failure happened inside an ordered AND plan, short-circuit the remaining siblings.
+        if parent.type == NodeType.AND and parent.children:
+            for sibling in parent.children:
+                mark_deleted_subtree(sibling, deleted_ids)
+
+            # Ensure the AND node is treated as failed (it may later be repaired/pruned).
+            if parent.status not in {NodeStatus.PRUNED, NodeStatus.DELETED}:
+                parent.status = NodeStatus.FAIL
+
+            # Remove any now-deleted nodes from the frontier.
+                
+        elif parent.type == NodeType.OR:
+            deleted_ids.add(node.id)
+            mark_deleted_subtree(node, deleted_ids)
+                
+        elif node.type == NodeType.ACTION:
+            deleted_ids.add(node.id)
+        else:
+            raise ValueError(f"Unexpected node type: {node.type}")
+        
+        if deleted_ids:
+            self.stack = [(n, st) for (n, st) in self.stack if n.id not in deleted_ids]
+
+
+    # def _synchronize_stack(self):
+    #     pass
 
     def _revise_and(self, node: Node) -> bool:
+        # The revision should probably:
+        # 1. Remove all not valid children
+        # 2. Remove the not valid children from the stack
+        # 3. Create all the new children nodes
         node.revision_count += 1
         return False
 
     def _revise_or(self, node: Node) -> bool:
+        # The revision should probably:
+        # 1. Remove all not valid children
+        # 2. Remove the not valid children from the stack
+        # 3. Create all the new children nodes
         node.revision_count += 1
         return False
 

@@ -29,6 +29,7 @@ class NodeState(Enum):
 
 
 class Node(BaseModel):
+    # The assignment of the ID should reflect the node's position in the tree.
     id: UUID = Field(default_factory=uuid4)
     type: NodeType
     status: NodeStatus = NodeStatus.UNVISITED
