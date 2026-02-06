@@ -101,8 +101,6 @@ class HPA:
 
         if node.node_type == NodeType.UNKNOWN:
             node.node_type = self.handler.populate_node_type(node, goal)
-            # self.stack.append((node, NodeState.EXITING))
-            # return
 
         if node.node_type == NodeType.ACTION:
             self.stack.append((node, NodeState.EXITING))
