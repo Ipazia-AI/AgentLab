@@ -30,7 +30,7 @@ class NodeState(Enum):
 
 class Node(BaseModel):
     # The assignment of the ID should reflect the node's position in the tree.
-    id: UUID = Field(default_factory=uuid4)
+    id: str = "0"
     type: NodeType
     status: NodeStatus = NodeStatus.UNVISITED
     text: str
@@ -45,5 +45,6 @@ class Node(BaseModel):
     execution_count: int = 0
     
     def add_child(self, child: "Node"):
+        child.id = self.id + f".{len(self.children)+1}"
         self.children.append(child)
 

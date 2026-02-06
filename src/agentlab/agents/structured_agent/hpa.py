@@ -107,7 +107,7 @@ class HPA:
             if self._has_successful_children_and(node):
                 return node
             if self._has_valid_children_and(node):
-                for child in reversed(node.children):
+                for child in node.children:
                     # If node is in state UNVISITED, VISITED or FAIL
                     if child.status not in self._closed_statuses():
                         self.stack.append((child, NodeState.ENTERING))
@@ -442,6 +442,7 @@ class HPA:
                 deleted_ids.add(n.id)
             for c in getattr(n, "children", []) or []:
                 mark_deleted_subtree(c, deleted_ids)
+                
         deleted_ids: set = set()
         # If failure happened inside an ordered AND plan, short-circuit the remaining siblings.
         if parent.type == NodeType.AND and parent.children:
@@ -458,8 +459,6 @@ class HPA:
             deleted_ids.add(node.id)
             mark_deleted_subtree(node, deleted_ids)
                 
-        elif node.type == NodeType.ACTION:
-            deleted_ids.add(node.id)
         else:
             raise ValueError(f"Unexpected node type: {node.type}")
         
