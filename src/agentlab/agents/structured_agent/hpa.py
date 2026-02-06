@@ -161,17 +161,16 @@ class HPA:
             return
 
         elif node.type == NodeType.AND:
-            if not self._has_valid_children_and(node):
-                if node.revision_count < self.max_revision_count:
-                    revised = self._revise_and(node)
-                    self._synchronize_stack()
-                    if revised:
-                        node.status = NodeStatus.VISITED
-                        self.stack.append((node, NodeState.ENTERING))
-                else:
-                    node.status = NodeStatus.PRUNED
-                    self._synchronize_stack()
-                    self._propagate_failure(node)
+            if not self._has_valid_children_and(node) and node.revision_count < self.max_revision_count:
+                revised = self._revise_and(node)
+                self._synchronize_stack()
+                if revised:
+                    node.status = NodeStatus.VISITED
+                    self.stack.append((node, NodeState.ENTERING))
+            else:
+                node.status = NodeStatus.PRUNED
+                self._synchronize_stack()
+                self._propagate_failure(node)
 
         elif node.type == NodeType.OR:
             if self._has_valid_children_or(node):
