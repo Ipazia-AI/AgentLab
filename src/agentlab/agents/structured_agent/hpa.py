@@ -117,7 +117,7 @@ class HPA:
             if self._has_successful_children_and(node):
                 return node
             if self._has_valid_children_and(node):
-                for child in reversed(node.children):
+                for child in node.children:
                     # If node is in state UNVISITED, VISITED or FAIL
                     if child.status not in self._closed_statuses():
                         self.stack.append((child, NodeState.ENTERING))
@@ -433,24 +433,6 @@ class HPA:
             self.action_history.append(node.text)
 
     def _propagate_failure(self, node: Node):
-        """
-        Handle failure bookkeeping when a node (typically an ACTION) is pruned/failed.
-
-        The HPA paper text (Sec. 4.3) states that if a failed ACTION node belongs to an AND node,
-        the agent deletes all remaining *unexecuted* siblings because the conjunctive objective can
-        no longer be satisfied.
-
-        We implement that semantics by:
-        - marking later siblings in the AND sequence as DELETED (and cascading to descendants)
-        - removing DELETED nodes from the DFS stack to keep traversal consistent
-
-        Notes:
-        - We do NOT mark ancestors as PRUNED here; ancestor repair/pruning is handled by the
-          FAILED-state processing logic.
-        - For OR parents, failure of one child does not invalidate other alternatives, so no deletion
-          occurs here.
-        """
-
         parent = node.parent
         if parent is None:
             return
@@ -463,6 +445,7 @@ class HPA:
                 deleted_ids.add(n.id)
             for c in getattr(n, "children", []) or []:
                 mark_deleted_subtree(c, deleted_ids)
+                
         deleted_ids: set = set()
         # If failure happened inside an ordered AND plan, short-circuit the remaining siblings.
         if parent.type == NodeType.AND and parent.children:
@@ -472,15 +455,12 @@ class HPA:
             # Ensure the AND node is treated as failed (it may later be repaired/pruned).
             if parent.status not in {NodeStatus.PRUNED, NodeStatus.DELETED}:
                 parent.status = NodeStatus.FAIL
-
-            # Remove any now-deleted nodes from the frontier.
                 
         elif parent.type == NodeType.OR:
+            node.status = NodeStatus.DELETED
             deleted_ids.add(node.id)
             mark_deleted_subtree(node, deleted_ids)
                 
-        elif node.type == NodeType.ACTION:
-            deleted_ids.add(node.id)
         else:
             raise ValueError(f"Unexpected node type: {node.type}")
         
