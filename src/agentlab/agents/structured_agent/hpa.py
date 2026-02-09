@@ -171,16 +171,22 @@ class HPA:
             return
 
         elif node.type == NodeType.AND:
-            if not self._has_valid_children_and(node) and node.revision_count < self.max_revision_count:
-                revised = self._revise_and(node)
-                #self._synchronize_stack()
-                if revised:
-                    node.status = NodeStatus.VISITED
-                    self.stack.append((node, NodeState.ENTERING))
-            else:
-                node.status = NodeStatus.PRUNED
-                # self._synchronize_stack()
-                self._propagate_failure(node)
+            if self._has_successful_children_and(node):
+                is_complete = self._check_and_complete(node)
+                if is_complete:
+                    node.status = NodeStatus.SUCCESS
+            is_valid = self._has_valid_children_and(node)
+            if not is_valid:
+                if node.revision_count < self.max_revision_count:
+                    revised = self._revise_and(node)
+                    if node.status == NodeStatus.SUCCESS:
+                        return
+                    elif revised or is_valid:
+                        node.status = NodeStatus.VISITED
+                        self.stack.append((node, NodeState.ENTERING))
+                else:
+                    node.status = NodeStatus.PRUNED
+                    self._propagate_failure(node)
 
         elif node.type == NodeType.OR:
             if self._has_valid_children_or(node):
@@ -190,14 +196,12 @@ class HPA:
 
             if node.revision_count < self.max_revision_count:
                 revised = self._revise_or(node)
-                #self._synchronize_stack()
                 if revised:
                     node.status = NodeStatus.VISITED
                     self.stack.append((node, NodeState.ENTERING))
-            else:
-                node.status = NodeStatus.PRUNED
-                # self._synchronize_stack()
-                self._propagate_failure(node)
+                else:
+                    node.status = NodeStatus.PRUNED
+                    self._propagate_failure(node)
 
     def _expand_node(self, node: Node, goal: str | None, obs: dict) -> Node:
         if self.chat_llm is None:
