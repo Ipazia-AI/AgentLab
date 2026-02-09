@@ -20,12 +20,8 @@ agent_config = HPAAgentArgs(
     max_retry=AGENT_4o_MINI.max_retry,
 )
 agent_config.flags.action = dp.ActionFlags(
-    action_set=HighLevelActionSetArgs(
-        subsets=["bid", "nav", "tab", "workarena", "workarena++"],
-        multiaction=False,
-    ),
-    long_description=False,
-    individual_examples=False,
+    long_description=True,
+    individual_examples=True,
 )
 
 agent_configs = [agent_config]
