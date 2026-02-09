@@ -2,12 +2,14 @@ from dataclasses import dataclass
 from typing import Any
 
 from browsergym.core.action.highlevel import HighLevelActionSet
+from browsergym.experiments import AgentInfo
 
 from agentlab.agents.agent_args import AgentArgs
 from agentlab.agents.dynamic_prompting import ObsFlags, make_obs_preprocessor
 from agentlab.agents.generic_agent.generic_agent import GenericAgent, GenericAgentArgs
 from agentlab.agents.generic_agent.generic_agent_prompt import GenericPromptFlags
 from agentlab.llm.base_api import BaseModelArgs
+from agentlab.llm.llm_utils import AIMessage, Discussion, SystemMessage
 from agentlab.llm.tracking import cost_tracker_decorator
 
 from .andor_tree import Node, NodeType
@@ -102,18 +104,54 @@ class HPAAgent(GenericAgent):
             action = action_node.text
             self.pending_action_node = action_node
 
-        agent_info = {
-            "stats": self.chat_llm.get_stats(),
-            "hpa": {
-                "pending_node_id": (
-                    str(self.pending_action_node.id) if self.pending_action_node else None
-                ),
-                "pending_node_type": (
-                    self.pending_action_node.type.name if self.pending_action_node else None
-                ),
-                "stack_depth": len(self.hpa.stack),
+        # Build chat messages for browsergym chat interface
+        # Include goal and action history for user visibility
+        chat_messages = Discussion()
+
+        # Add system message with goal
+        system_content = f"Goal: {goal}\n\nYou are using AND/OR tree to select actions."
+        chat_messages.add_message(SystemMessage(system_content))
+
+        # Add user message with current observation context (if available)
+        if obs.get("chat_messages"):
+            # Browsergym chat_messages use format: {'role': str, 'message': str, 'timestamp': float}
+            # Convert to standard format
+            for msg in obs["chat_messages"]:
+                if isinstance(msg, dict):
+                    role = msg.get("role", "user")
+                    # Handle browsergym format (uses 'message') vs standard format (uses 'content')
+                    content = msg.get("content") or msg.get("message", "")
+                    if content:
+                        chat_messages.add_message({"role": role, "content": content})
+        else:
+            # Otherwise, create a user message with goal
+            chat_messages.add_message({"role": "user", "content": f"Task: {goal}"})
+
+        # Add assistant message with the selected action and reasoning
+        assistant_content = f"Action: {action}"
+        # if len(self.actions) > 1:
+        #     assistant_content += (
+        #         f"\n\nPrevious actions: {', '.join(str(a) for a in self.actions[:-1])}"
+        #     )
+        chat_messages.add_message(AIMessage(assistant_content))
+
+        # Return format expected by BrowserGym/AgentLab
+        agent_info = AgentInfo(
+            chat_messages=chat_messages,
+            stats=self.chat_llm.get_stats(),
+            extra_info={
+                "hpa": {
+                    "pending_node_id": (
+                        str(self.pending_action_node.id) if self.pending_action_node else None
+                    ),
+                    "pending_node_type": (
+                        self.pending_action_node.type.name if self.pending_action_node else None
+                    ),
+                    "stack_depth": len(self.hpa.stack),
+                },
             },
-        }
+        )
+
         return action, agent_info
 
     def _extract_goal(self, obs: dict) -> str:
