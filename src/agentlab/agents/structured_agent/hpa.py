@@ -88,7 +88,8 @@ class HPA:
 
         return None
 
-    def finalize_action(self, node: Node, obs: dict, success: bool):
+    def finalize_action(self, node: Node, obs: dict):
+        success = True if obs.get("last_action_error") == "" else False
         if success:
             self._global_tree_update()
             self._update_observations(node, obs)
@@ -117,7 +118,7 @@ class HPA:
             if self._has_successful_children_and(node):
                 return node
             if self._has_valid_children_and(node):
-                for child in node.children:
+                for child in reversed(node.children):
                     # If node is in state UNVISITED, VISITED or FAIL
                     if child.status not in self._closed_statuses():
                         self.stack.append((child, NodeState.ENTERING))
@@ -184,9 +185,9 @@ class HPA:
                     elif revised or is_valid:
                         node.status = NodeStatus.VISITED
                         self.stack.append((node, NodeState.ENTERING))
-                else:
-                    node.status = NodeStatus.PRUNED
-                    self._propagate_failure(node)
+                    else:
+                        node.status = NodeStatus.PRUNED
+                        self._propagate_failure(node)
 
         elif node.type == NodeType.OR:
             if self._has_valid_children_or(node):
@@ -224,6 +225,7 @@ class HPA:
             task_constraints=task_constraints,
             observation=observation,
         )
+        # TODO: Check if we need to add obs and notes to the inference
         expansion = self._infer_node_expansion(
             task_description=task_description,
             task_constraints=task_constraints,
