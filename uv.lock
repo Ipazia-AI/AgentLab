@@ -1,5 +1,5 @@
 version = 1
-revision = 2
+revision = 3
 requires-python = ">=3.11, <3.13"
 resolution-markers = [
     "python_full_version >= '3.12'",
@@ -33,6 +33,7 @@ dependencies = [
     { name = "pyyaml" },
     { name = "ray", extra = ["default"] },
     { name = "requests" },
+    { name = "rich" },
     { name = "tiktoken" },
     { name = "torch" },
 ]
@@ -84,6 +85,7 @@ requires-dist = [
     { name = "pyyaml", specifier = ">=6" },
     { name = "ray", extras = ["default"] },
     { name = "requests" },
+    { name = "rich", specifier = ">=14.2.0" },
     { name = "sentence-transformers", marker = "extra == 'hint'", specifier = ">=5.0.0" },
     { name = "tiktoken" },
     { name = "torch", specifier = ">=2.9.1" },
