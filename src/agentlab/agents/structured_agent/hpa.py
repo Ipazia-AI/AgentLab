@@ -4,6 +4,7 @@ from typing import List, Tuple
 
 from bgym import AbstractActionSet
 
+from agentlab.agents import dynamic_prompting as dp
 from agentlab.agents.dynamic_prompting import ActionFlags
 from agentlab.llm.llm_utils import (
     Discussion,
@@ -30,12 +31,16 @@ class HPA:
         action_set: AbstractActionSet,
         budget: int = 1000,
         max_revision_count: int = 3,
+        max_prompt_tokens: int | None = None,
+        max_trunc_itr: int = 20,
     ):
         self.chat_llm = chat_llm
         self.action_flags = action_flags
         self.action_set = action_set
         self.budget = budget  # remove
         self.max_revision_count = max_revision_count
+        self.max_prompt_tokens = max_prompt_tokens
+        self.max_trunc_itr = max_trunc_itr
         self.stack: List[Tuple[Node, NodeState]] = []
         self._counter = 0
         self.task_constraints: list[str] = []
@@ -238,7 +243,7 @@ class HPA:
 
     def _infer_task_constraints(self, task_description: str, observation: str) -> list[str]:
         system_message = TaskConstraintsPrompt.system_message
-        user_message = TaskConstraintsPrompt.user_message(
+        user_message = TaskConstraintsPrompt.user_prompt(
             task_objective=task_description,
             current_observation=observation,
         )
@@ -256,7 +261,7 @@ class HPA:
         observation: str,
     ) -> dict:
         system_message = ObservationSummaryPrompt.system_message
-        user_message = ObservationSummaryPrompt.user_message(
+        user_message = ObservationSummaryPrompt.user_prompt(
             task_description=task_description,
             task_constraints=task_constraints or None,
             task_progress_summary=self.task_progress_summary,
@@ -277,7 +282,7 @@ class HPA:
         observation: str,
     ) -> dict:
         system_message = NotesSummaryPrompt.system_message
-        user_message = NotesSummaryPrompt.user_message(
+        user_message = NotesSummaryPrompt.user_prompt(
             task_description=task_description,
             task_constraints=task_constraints or None,
             task_progress_summary=self.task_progress_summary,
@@ -302,7 +307,7 @@ class HPA:
         node: Node,
     ) -> dict:
         system_message = NodeExpansionPrompt(self.action_set, self.action_flags).system_message()
-        user_message = NodeExpansionPrompt.user_message(
+        user_message = NodeExpansionPrompt.user_prompt(
             task_description=task_description,
             task_constraints=task_constraints or None,
             task_progress_summary=self.task_progress_summary,
@@ -356,7 +361,18 @@ class HPA:
         except (ValueError, IndexError):
             return None, text
 
-    def _call_json_prompt(self, system_message: str, user_message: str) -> dict:
+    def _call_json_prompt(self, system_message: str, user_message: str | dp.Shrinkable) -> dict:
+        if isinstance(user_message, dp.Shrinkable):
+            if self.max_prompt_tokens is not None:
+                user_message = dp.fit_tokens(
+                    shrinkable=user_message,
+                    max_prompt_tokens=self.max_prompt_tokens,
+                    model_name=self.chat_llm.model_name,
+                    max_iterations=self.max_trunc_itr,
+                    additional_prompts=system_message,
+                )
+            else:
+                user_message = user_message.prompt
         messages = Discussion([SystemMessage(system_message), HumanMessage(user_message)])
 
         def parser(text_answer: str) -> dict:

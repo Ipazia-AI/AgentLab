@@ -67,6 +67,8 @@ class HPAAgent(GenericAgent):
             action_set=self.action_set,
             budget=budget,
             max_revision_count=max_revision_count,
+            max_prompt_tokens=self.flags.max_prompt_tokens,
+            max_trunc_itr=self.flags.max_trunc_itr,
         )
         self._local_reset()
 

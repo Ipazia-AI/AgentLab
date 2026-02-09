@@ -7,6 +7,42 @@ from bgym import AbstractActionSet
 from agentlab.agents import dynamic_prompting as dp
 
 
+class _TextTrunkater(dp.Trunkater):
+    def __init__(
+        self,
+        value: str | list[str] | None,
+        visible: bool = True,
+        start_trunkate_iteration: int = 3,
+        shrink_speed: float = 0.3,
+    ) -> None:
+        super().__init__(
+            visible=visible,
+            start_trunkate_iteration=start_trunkate_iteration,
+            shrink_speed=shrink_speed,
+        )
+        self._prompt = _normalize_block(value)
+
+
+class _ShrinkableUserMessage(dp.Shrinkable):
+    def __init__(self, blocks: list[tuple[str, str | dp.PromptElement | None]]) -> None:
+        super().__init__()
+        self._blocks = blocks
+
+    def shrink(self) -> None:
+        for _, value in self._blocks:
+            if isinstance(value, dp.Shrinkable):
+                value.shrink()
+
+    @property
+    def _prompt(self) -> str:
+        message = "USER MESSAGE:\n\n"
+        for label, value in self._blocks:
+            if isinstance(value, dp.PromptElement):
+                value = value.prompt
+            message += _optional_block(label, value)
+        return message
+
+
 def _normalize_block(value) -> str:
     if value is None:
         return ""
@@ -60,15 +96,20 @@ Example output:
 """
 
     @staticmethod
-    def user_message(task_objective: str, current_observation: str) -> str:
-        return f"""\
-USER MESSAGE:
+    def user_prompt(task_objective: str, current_observation: str) -> dp.Shrinkable:
+        return _ShrinkableUserMessage(
+            [
+                ("QUERY", task_objective),
+                ("WEB PAGE CONTENT", _TextTrunkater(current_observation, start_trunkate_iteration=2)),
+            ]
+        )
 
-QUERY:
-{task_objective}
-WEB PAGE CONTENT:
-{current_observation}
-"""
+    @staticmethod
+    def user_message(task_objective: str, current_observation: str) -> str:
+        return TaskConstraintsPrompt.user_prompt(
+            task_objective=task_objective,
+            current_observation=current_observation,
+        ).prompt
 
 
 @dataclass(frozen=True)
@@ -112,6 +153,28 @@ Example:
 """
 
     @staticmethod
+    def user_prompt(
+        task_description: str,
+        observation: str,
+        task_constraints: str | list[str] | None = None,
+        task_progress_summary: str | None = None,
+        observation_history: str | list[str] | None = None,
+        action_history: str | list[str] | None = None,
+        notes_summary: str | None = None,
+    ) -> dp.Shrinkable:
+        return _ShrinkableUserMessage(
+            [
+                ("TASK DESCRIPTION", task_description),
+                ("TASK CONSTRAINTS", task_constraints),
+                ("TASK PROGRESS SUMMARY", task_progress_summary),
+                ("OBSERVATION HISTORY", _TextTrunkater(observation_history, start_trunkate_iteration=4)),
+                ("ACTION HISTORY", _TextTrunkater(action_history, start_trunkate_iteration=4)),
+                ("NOTES SUMMARY", _TextTrunkater(notes_summary, start_trunkate_iteration=4)),
+                ("CURRENT OBSERVATION", _TextTrunkater(observation, start_trunkate_iteration=2)),
+            ]
+        )
+
+    @staticmethod
     def user_message(
         task_description: str,
         observation: str,
@@ -121,16 +184,15 @@ Example:
         action_history: str | list[str] | None = None,
         notes_summary: str | None = None,
     ) -> str:
-        return (
-            "USER MESSAGE:\n\n"
-            + _optional_block("TASK DESCRIPTION", task_description)
-            + _optional_block("TASK CONSTRAINTS", task_constraints)
-            + _optional_block("TASK PROGRESS SUMMARY", task_progress_summary)
-            + _optional_block("OBSERVATION HISTORY", observation_history)
-            + _optional_block("ACTION HISTORY", action_history)
-            + _optional_block("NOTES SUMMARY", notes_summary)
-            + _optional_block("CURRENT OBSERVATION", observation)
-        )
+        return ObservationSummaryPrompt.user_prompt(
+            task_description=task_description,
+            observation=observation,
+            task_constraints=task_constraints,
+            task_progress_summary=task_progress_summary,
+            observation_history=observation_history,
+            action_history=action_history,
+            notes_summary=notes_summary,
+        ).prompt
 
 
 @dataclass(frozen=True)
@@ -168,6 +230,26 @@ Example:
 """
 
     @staticmethod
+    def user_prompt(
+        task_description: str,
+        observation: str,
+        task_constraints: str | list[str] | None = None,
+        task_progress_summary: str | None = None,
+        action_history: str | list[str] | None = None,
+        notes: str | None = None,
+    ) -> dp.Shrinkable:
+        return _ShrinkableUserMessage(
+            [
+                ("TASK DESCRIPTION", task_description),
+                ("TASK CONSTRAINTS", task_constraints),
+                ("TASK PROGRESS SUMMARY", task_progress_summary),
+                ("ACTION HISTORY", _TextTrunkater(action_history, start_trunkate_iteration=4)),
+                ("PREVIOUS NOTES", _TextTrunkater(notes, start_trunkate_iteration=4)),
+                ("CURRENT OBSERVATION", _TextTrunkater(observation, start_trunkate_iteration=2)),
+            ]
+        )
+
+    @staticmethod
     def user_message(
         task_description: str,
         observation: str,
@@ -176,15 +258,14 @@ Example:
         action_history: str | list[str] | None = None,
         notes: str | None = None,
     ) -> str:
-        return (
-            "USER MESSAGE:\n\n"
-            + _optional_block("TASK DESCRIPTION", task_description)
-            + _optional_block("TASK CONSTRAINTS", task_constraints)
-            + _optional_block("TASK PROGRESS SUMMARY", task_progress_summary)
-            + _optional_block("ACTION HISTORY", action_history)
-            + _optional_block("PREVIOUS NOTES", notes)
-            + _optional_block("CURRENT OBSERVATION", observation)
-        )
+        return NotesSummaryPrompt.user_prompt(
+            task_description=task_description,
+            observation=observation,
+            task_constraints=task_constraints,
+            task_progress_summary=task_progress_summary,
+            action_history=action_history,
+            notes=notes,
+        ).prompt
 
 
 @dataclass(init=False)
@@ -270,6 +351,30 @@ Format 2 (node type AND or OR):
 """
 
     @staticmethod
+    def user_prompt(
+        task_description: str,
+        task_constraints: str | list[str] | None,
+        task_progress_summary: str | None,
+        notes_summary: str | None,
+        observation: str,
+        node_id: str,
+        node_description: str,
+        local_tree_info: str,
+    ) -> dp.Shrinkable:
+        return _ShrinkableUserMessage(
+            [
+                ("ROOT-LEVEL TASK DESCRIPTION", task_description),
+                ("TASK CONSTRAINTS", task_constraints),
+                ("TASK PROGRESS SUMMARY", _TextTrunkater(task_progress_summary, start_trunkate_iteration=4)),
+                ("NOTES SUMMARY", _TextTrunkater(notes_summary, start_trunkate_iteration=4)),
+                ("OBSERVATION", _TextTrunkater(observation, start_trunkate_iteration=2)),
+                ("node_id", node_id),
+                ("DESCRIPTION", node_description),
+                ("LOCAL TREE INFORMATION", _TextTrunkater(local_tree_info, start_trunkate_iteration=4)),
+            ]
+        )
+
+    @staticmethod
     def user_message(
         task_description: str,
         task_constraints: str | list[str] | None,
@@ -280,14 +385,13 @@ Format 2 (node type AND or OR):
         node_description: str,
         local_tree_info: str,
     ) -> str:
-        return (
-            "USER MESSAGE:\n\n"
-            + _optional_block("ROOT-LEVEL TASK DESCRIPTION", task_description)
-            + _optional_block("TASK CONSTRAINTS", task_constraints)
-            + _optional_block("TASK PROGRESS SUMMARY", task_progress_summary)
-            + _optional_block("NOTES SUMMARY", notes_summary)
-            + _optional_block("OBSERVATION", observation)
-            + _optional_block("node_id", node_id)
-            + _optional_block("DESCRIPTION", node_description)
-            + _optional_block("LOCAL TREE INFORMATION", local_tree_info)
-        )
+        return NodeExpansionPrompt.user_prompt(
+            task_description=task_description,
+            task_constraints=task_constraints,
+            task_progress_summary=task_progress_summary,
+            notes_summary=notes_summary,
+            observation=observation,
+            node_id=node_id,
+            node_description=node_description,
+            local_tree_info=local_tree_info,
+        ).prompt
