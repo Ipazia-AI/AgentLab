@@ -7,6 +7,12 @@ The REPL environment is initialized with:
 1. A `context : dict[str, Any]` variable that contains extremely important information about your query. You should check the content of the `context` variable to understand what you are working with. Make sure you look through it sufficiently as you answer your query. The context variable has the following keys: 'axtree' for accessibility tree, 'html' for HTML content, 'goal' for the goal of the query, 'error' for any errors that occurred.
 2. A `llm_query` function that allows you to query an LLM (that can handle around 500K chars) inside your REPL environment.
 3. The ability to use `print()` and regular expressions with `re` statements to view the output of your REPL code and continue your reasoning.
+4. Convenience aliases are also available: `axtree_str`, `html_str`, `goal`, `last_action_error`.
+
+Important typing details:
+- `context` is always a dictionary.
+- `llm_query(...)` always returns a plain string (never a dict/object).
+- If you need keys from context, use `context.keys()` or `context.get("axtree")`.
 
 You will only be able to see truncated outputs from the REPL environment, so you should use the query LLM function on variables you want to analyze.
 You will find this function especially useful when you have to analyze the semantics of the context. 
@@ -61,7 +67,7 @@ When you have determined the action to take, use FINAL(action) with ONLY the act
 """
 
 # Prompt at every step to query root LM to make a decision
-USER_PROMPT = """Think step-by-step on what to do using the REPL environment (which contains the context) to answer the original task: \"{task}\".
+USER_PROMPT = """Think step-by-step on what to do using the REPL environment (which contains the context) to answer the original task: \"{query}\".
 
 Continue using the REPL environment, which has the `context` variable, and querying sub-LLMs by writing to ```repl``` tags, and determine your answer. 
 

@@ -8,6 +8,7 @@ Based on run_miniwob_agentq.py but using the RLM approach instead of AgentQ.
 """
 
 import logging
+import os
 from pathlib import Path
 
 import bgym
@@ -101,11 +102,19 @@ except (AttributeError, Exception) as e:
     logger.warning(f"Could not filter benchmark: {e}. Running full benchmark if needed.")
 print(benchmark)
 # 5. Run Study
-n_jobs = 5  # Sequential execution for debugging
-parallel_backend = "ray"
+n_jobs = int(os.getenv("RLM_N_JOBS", "5"))
+parallel_backend = os.getenv("RLM_PARALLEL_BACKEND", "ray")
 
 if __name__ == "__main__":
-    study = Study([agent_args], benchmark, logging_level_stdout=logging.INFO, logging_level=logging.INFO)
+    # RLM steps can be substantially slower than generic prompting.
+    # Increase timeout budget to avoid premature Ray cancellations.
+    study = Study(
+        [agent_args],
+        benchmark,
+        logging_level_stdout=logging.INFO,
+        logging_level=logging.INFO,
+        avg_step_timeout=120,
+    )
 
     print(f"Starting Study on {benchmark_name} with GenericAgent + RLM...")
     print(f"  Base model: {base_model_args.model_name}")
