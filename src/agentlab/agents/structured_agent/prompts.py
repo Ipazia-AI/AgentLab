@@ -343,8 +343,8 @@ Format 2 (node type AND or OR):
   "node_description": "Description of the node here",
   "node_type": "AND or OR",
   "expansion": [
-    "First subgoal or alternative strategy",
-    "Second subgoal or alternative strategy"
+    "Provide a textual description of the first subgoal or alternative strategy. If the subgoal is an action, provide only a general description of the action, not the actual element to perform the action on.",
+    "Provide a textual description of the second subgoal or alternative strategy. If the subgoal is an action, provide only a general description of the action, not the actual element to perform the action on."
   ],
   "reasoning": "Brief justification explaining why the node is classified as AND or OR"
 }}
