@@ -25,13 +25,12 @@ agent_config.flags.action = dp.ActionFlags(
 )
 
 agent_configs = [agent_config]
-benchmark = DEFAULT_BENCHMARKS["workarena_l1"]()
-# benchmark.env_args_list = benchmark.env_args_list[:1]
+benchmark = DEFAULT_BENCHMARKS["workarena_l1"](n_repeats=1)
 
 metadata = benchmark.task_metadata
-tasks_workload = metadata[metadata["task_name"].str.match("workarena.servicenow.filter-asset-list")]
+tasks_workload = metadata[metadata["task_name"].str.match("workarena.servicenow.all-menu")]
 tasks_list = tasks_workload["task_name"].tolist()
-benchmark = benchmark.subset_from_list(tasks_list)
+benchmark = benchmark.subset_from_regexp("task_name", "workarena.servicenow.all-menu")
 
 
 # Optionally filter tasks:

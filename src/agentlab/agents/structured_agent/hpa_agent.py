@@ -100,7 +100,7 @@ class HPAAgent(GenericAgent):
 
         action = None
         if action_node is not None:
-            action = action_node.text
+            action = action_node.action
             self.pending_action_node = action_node
 
         # Build chat messages for browsergym chat interface

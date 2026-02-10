@@ -51,8 +51,8 @@ class HPA:
         self.task_feedback: str | None = None
 
     def reset(self):
-        self.stack = [(Node(type=NodeType.UNKNOWN, text="Solve task"), NodeState.ENTERING)]
         self._counter = 0
+        self.stack = []
         self.task_constraints = []
         self.task_progress_summary = None
         self.notes_summary = None
@@ -61,6 +61,10 @@ class HPA:
         self.task_feedback = None
 
     def run_until_action(self, goal: str | None, obs: dict) -> Node | None:
+
+        if self._counter == 0:
+            self.stack = [(Node(type=NodeType.UNKNOWN, description=goal), NodeState.ENTERING)]
+
         while self.stack:
             node, state = self.stack.pop()
 
@@ -72,9 +76,9 @@ class HPA:
                 continue
 
             if state == NodeState.ENTERING:
-                action_node = self._process_node_entering(node, goal, obs)
-                if action_node.type == NodeType.ACTION:
-                    return action_node
+                processed_node = self._process_node_entering(node, goal, obs)
+                if processed_node.type == NodeType.ACTION:
+                    return processed_node
 
             elif state == NodeState.EXITING:
                 self._process_node_exiting(node)
@@ -206,12 +210,12 @@ class HPA:
 
     def _expand_node(self, node: Node, goal: str | None, obs: dict) -> Node:
         if self.chat_llm is None:
-            node.text = "report_infeasible"
+            node.description = "report_infeasible"
             node.metadata["node_description"] = "LLM not available"
             node.type = NodeType.ACTION
             return node
 
-        task_description = goal or "Complete the task."
+        task_description = node.description or goal or "Complete the task."
         observation = obs.get("axtree_txt") or obs.get("dom_txt") or obs.get("pruned_html") or ""
 
         task_constraints = self._infer_task_constraints(task_description, observation)
@@ -320,7 +324,7 @@ class HPA:
             notes_summary=self.notes_summary,
             observation=observation,
             node_id=str(node.id),
-            node_description=node.text,
+            node_description=node.description,
             local_tree_info=self._describe_local_tree(node),
         )
         return self._call_json_prompt(system_message, user_message)
@@ -331,14 +335,14 @@ class HPA:
             action = expansion.get("expansion")
             if not isinstance(action, str) or not action.strip():
                 raise ParseError("ACTION node requires a non-empty 'expansion' string.")
-            node.text = action.strip()
-            node.metadata["node_description"] = expansion.get("node_description", node.text)
+            node.action = action.strip()
             return NodeType.ACTION
 
         if node_type not in {"AND", "OR"}:
             raise ParseError("node_type must be ACTION, AND, or OR.")
 
-        node.metadata["node_description"] = expansion.get("node_description", node.text)
+        node.description = expansion.get("node_description", node.description)
+
         children = expansion.get("expansion", [])
         if not isinstance(children, list) or not children:
             raise ParseError("AND/OR node requires a non-empty 'expansion' list.")
@@ -351,7 +355,7 @@ class HPA:
             clean_text = child_text.strip()
             if node_type == "OR":
                 score, clean_text = self._extract_score(clean_text)
-            child = Node(type=NodeType.UNKNOWN, text=clean_text, parent=node, score=score)
+            child = Node(type=NodeType.UNKNOWN, description=clean_text, parent=node, score=score)
             node.add_child(child)
         return NodeType.AND if node_type == "AND" else NodeType.OR
 
@@ -403,10 +407,10 @@ class HPA:
         if node.parent is None:
             return "root_node"
         parts.append(f"parent_node_id: {node.parent.id}")
-        parts.append(f"parent_node_description: {node.parent.text}")
+        parts.append(f"parent_node_description: {node.parent.description}")
         if node.parent.children:
             siblings = [
-                f"{child.id}: {child.text} (status={child.status.name})"
+                f"{child.id}: {child.description} (status={child.status.name})"
                 for child in node.parent.children
                 if child is not node
             ]
@@ -414,7 +418,7 @@ class HPA:
                 parts.append("siblings:\n" + "\n".join(siblings))
         if node.parent.parent and node.parent.parent.children:
             parent_siblings = [
-                f"{child.id}: {child.text} (status={child.status.name})"
+                f"{child.id}: {child.description} (status={child.status.name})"
                 for child in node.parent.parent.children
                 if child is not node.parent
             ]
@@ -435,8 +439,8 @@ class HPA:
         observation = obs.get("axtree_txt") or obs.get("dom_txt") or obs.get("pruned_html")
         if observation:
             self.observation_history.append(observation)
-        if node.type == NodeType.ACTION and node.text:
-            self.action_history.append(node.text)
+        if node.type == NodeType.ACTION and node.description:
+            self.action_history.append(node.description)
 
     def _propagate_failure(self, node: Node):
         parent = node.parent
@@ -521,7 +525,7 @@ class HPA:
 
 
 def main():
-    root = Node(type=NodeType.UNKNOWN, text="Solve task")
+    root = Node(type=NodeType.UNKNOWN, description="Solve task")
     agent = HPA(chat_llm=None, action_set=None)
     agent.reset(root_node=root, goal="Complete the task")
     next_action = agent.run_until_action()

@@ -29,11 +29,11 @@ class NodeState(Enum):
 
 
 class Node(BaseModel):
-    # The assignment of the ID should reflect the node's position in the tree.
     id: str = "0"
     type: NodeType
     status: NodeStatus = NodeStatus.UNVISITED
-    text: str
+    description: str
+    action: str | None = None
 
     parent: Optional["Node"] = None
     children: list["Node"] = Field(default_factory=list)
@@ -43,8 +43,7 @@ class Node(BaseModel):
 
     revision_count: int = 0
     execution_count: int = 0
-    
+
     def add_child(self, child: "Node"):
         child.id = self.id + f".{len(self.children)+1}"
         self.children.append(child)
-
