@@ -16,6 +16,7 @@ from agentlab.llm.llm_utils import (
 
 from .andor_tree import Node, NodeState, NodeStatus, NodeType
 from .prompts import (
+    GlobalTreeUpdatePrompt,
     NodeExpansionPrompt,
     NotesSummaryPrompt,
     ObservationSummaryPrompt,
@@ -435,8 +436,21 @@ class HPA:
     def _set_context(self, node: Node):
         pass
 
-    def _global_tree_update(self):
-        pass
+    def _global_tree_update(self, task_description: str, task_constraints: list[str], observation: str) -> None: # TODO: Should return the updated global tree: a list of nodes ordered by their ids
+        system_message = GlobalTreeUpdatePrompt(self.action_set, self.action_flags).system_message()
+        user_message = GlobalTreeUpdatePrompt.user_prompt(
+            task_description=task_description,
+            task_constraints=task_constraints or None,
+            task_progress_summary=self.task_progress_summary,
+            notes_summary=self.notes_summary,
+            observation=observation,
+            global_tree_info=self.global_tree, # TODO: Implement the global_tree attribute: a list of nodes ordered by their ids
+        )
+        result = self._call_json_prompt(system_message, user_message)
+        pruned_nodes = result.get("prune", [])
+        updated_nodes = result.get("update", {})
+        # TODO: prune and update the nodes in the global_tree
+        return 
 
     def _update_observations(self, node: Node, obs: dict):
         observation = obs.get("axtree_txt") or obs.get("dom_txt") or obs.get("pruned_html")
