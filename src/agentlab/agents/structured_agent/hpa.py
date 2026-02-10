@@ -88,7 +88,7 @@ class HPA:
 
         return None
 
-    def finalize_action(self, node: Node, obs: dict):
+    def finalize_action(self, node: Node, obs: dict, success: bool = False):
         success = True if obs.get("last_action_error") == "" else False
         if success:
             self._global_tree_update()
@@ -451,7 +451,7 @@ class HPA:
                 deleted_ids.add(n.id)
             for c in getattr(n, "children", []) or []:
                 mark_deleted_subtree(c, deleted_ids)
-                
+
         deleted_ids: set = set()
         # If failure happened inside an ordered AND plan, short-circuit the remaining siblings.
         if parent.type == NodeType.AND and parent.children:
@@ -461,18 +461,17 @@ class HPA:
             # Ensure the AND node is treated as failed (it may later be repaired/pruned).
             if parent.status not in {NodeStatus.PRUNED, NodeStatus.DELETED}:
                 parent.status = NodeStatus.FAIL
-                
+
         elif parent.type == NodeType.OR:
             node.status = NodeStatus.DELETED
             deleted_ids.add(node.id)
             mark_deleted_subtree(node, deleted_ids)
-                
+
         else:
             raise ValueError(f"Unexpected node type: {node.type}")
-        
+
         if deleted_ids:
             self.stack = [(n, st) for (n, st) in self.stack if n.id not in deleted_ids]
-
 
     # def _synchronize_stack(self):
     #     pass

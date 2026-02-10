@@ -90,8 +90,7 @@ class HPAAgent(GenericAgent):
 
         if self.pending_action_node is not None and isinstance(obs, dict):
             # To be adjusted to the right observation key depending on how we manage the success result
-            success = "axtree_txt" in obs and obs.get("axtree_txt") is not None
-            self.hpa.finalize_action(self.pending_action_node, obs, success)
+            self.hpa.finalize_action(self.pending_action_node, obs)
             self.pending_action_node = None
 
         action_node = self.hpa.run_until_action(
