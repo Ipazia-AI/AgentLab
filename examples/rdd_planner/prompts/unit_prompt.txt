@@ -1,0 +1,18 @@
+Solve the following problem:
+
+Problem: {problem}
+
+Current State: {state}
+
+## Action Space
+{action_set_description}
+
+{axtree_context}
+
+{html_context}
+
+{ancestors}
+
+Provide a clear, specific solution that accomplishes this task. Be concise and actionable.
+
+{examples}

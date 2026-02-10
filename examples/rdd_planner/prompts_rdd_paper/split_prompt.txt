@@ -1,0 +1,23 @@
+You manage {width} workers. Your task is to decompose the problem below in order to delegate sub-problems to your workers. You must only use from one up to {width} of the workers, never more than {width} workers. The decomposition must be complete: combining the solutions to the sub-problems must be enough to solve the original problem. You must be brief and clear. Do not attempt to solve the sub-problems.
+
+If the problem is simple enough to be solved by a single worker, you must only output "{unit_statement}". Otherwise, you must propose sub-problems in a bullet list. The workers will not be provided with the original problem description nor the other sub-problem descriptions. Therefore, you must include all necessary data and instructions in the description of each sub-problem. You must never reference the original problem and you must not assume the workers can access its description and input data; instead, you must copy all relevant instructions and input data to the descriptions of sub-problems when necessary. The sub-problems you generate can be still complex; they will be decomposed again by your workers if necessary.
+
+You can decompose the task via either the "data decomposition strategy" or the "task decomposition strategy":
+
+- The data decomposition strategy produces sub-problems describing exactly the same data transformation given in the original problem, applied to partitions of the input data. The partitions of the input data must be of approximately equal size. The sub-problem descriptions must be exactly the same as the description of the original problem.
+
+- The task decomposition strategy produces sub-problems describing different data transformations, applied to exactly the same input data given in the original problem. For example, the sub-problem transformations may describe sub-steps required to solve the original problem.
+
+Each sub-problem must have a unique identifier given between square brackets before the sub-problem description. If you need to, you can also specify dependencies: within each sub-problem's description, you can refer to the solutions to other sub-problems using their identifiers between curly braces. Sub-problems cannot have the original problem as a dependency. The scheduler will substitute the identifiers of the dependencies with their solutions before sending the sub-problems to the workers. All dependencies stated between curly braces must also be sub-problems present in your bullet list.
+
+{examples}
+
+## Problem
+
+Problem: {problem}
+
+Current State: {state}
+
+{ancestors}
+
+Answer:
