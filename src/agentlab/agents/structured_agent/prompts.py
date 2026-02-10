@@ -35,7 +35,7 @@ class _ShrinkableUserMessage(dp.Shrinkable):
 
     @property
     def _prompt(self) -> str:
-        message = "USER MESSAGE:\n\n"
+        message = ""
         for label, value in self._blocks:
             if isinstance(value, dp.PromptElement):
                 value = value.prompt
@@ -61,8 +61,6 @@ def _optional_block(label: str, value) -> str:
 @dataclass(frozen=True)
 class TaskConstraintsPrompt:
     system_message: str = """\
-SYSTEM MESSAGE:
-
 You are a web-browsing assistant designed to extract structured constraint data from user queries. Given a natural language query, identify and return a list of task constraints that apply to the overall task.
 A task constraint is an explicitly stated condition that affects the overall search or task execution.
 
@@ -96,7 +94,7 @@ Example output:
 """
 
     @staticmethod
-    def user_prompt(task_objective: str, current_observation: str) -> dp.Shrinkable:
+    def user_prompt(task_objective: str, current_observation: str | None = None) -> dp.Shrinkable:
         return _ShrinkableUserMessage(
             [
                 ("QUERY", task_objective),
@@ -105,7 +103,7 @@ Example output:
         )
 
     @staticmethod
-    def user_message(task_objective: str, current_observation: str) -> str:
+    def user_message(task_objective: str, current_observation: str | None = None) -> str:
         return TaskConstraintsPrompt.user_prompt(
             task_objective=task_objective,
             current_observation=current_observation,
@@ -115,8 +113,6 @@ Example output:
 @dataclass(frozen=True)
 class ObservationSummaryPrompt:
     system_message: str = """\
-SYSTEM MESSAGE:
-
 You are a Context Summarization and Critiquing Agent for web-browsing tasks.
 Your job is to maintain an accurate, up-to-date understanding of task progress by analyzing:
 - Task description
@@ -138,7 +134,7 @@ Instructions:
 Response format (valid JSON):
 {
   "observation_summary": "Describe the information from the CURRENT OBSERVATION. Emphasize elements and features relevant for fulfilling the task objective. Include all important detail.",
-  "observation_highlights": [123, 8765, 345],
+  "observation_highlights": "List of relevant element IDs from the CURRENT OBSERVATION that are useful for the task.",
   "task_progress": "Summarize actions actually taken and assess each explicitly stated task requirement or constraint. Diagnose why the task is not complete, then give key takeaways.",
   "task_feedback": "Outline what the agent should focus on next to complete the task. (2 sentences)"
 }
@@ -198,8 +194,6 @@ Example:
 @dataclass(frozen=True)
 class NotesSummaryPrompt:
     system_message: str = """\
-SYSTEM MESSAGE:
-
 You are an advanced web-browsing agent that generates notes from the current observation and forms a response to the task using those notes.
 
 You are given:
@@ -280,8 +274,6 @@ class NodeExpansionPrompt:
 
     def system_message(self) -> str:
         return f"""\
-SYSTEM MESSAGE:
-
 You are an efficient logical (AND/OR) tree constructing agent specialized in web-browsing tasks. You solve complex problems using AND/OR planning trees.
 You dynamically construct AND/OR planning trees from observations of the webpage’s accessibility tree structure for efficient and robust task execution.
 
@@ -314,16 +306,15 @@ Your task for the given node:
    A. Mark node as ACTION if the goal can be achieved using a single atomic action from the list above.
    B. Expand the node if the goal is not atomic and requires a sequence of atomic actions.
       - For AND nodes, provide the ordered list of logical subgoals.
-      - For OR nodes, provide alternative strategies ordered by likelihood of success.
-      - For OR nodes, include a score in range (0,1) within each string, e.g. "Strategy here (score: 0.85)".
+      - For OR nodes, provide a list of alternative strategies ordered by likelihood of success, including a (0–1) score in each string (e.g., “Strategy here (score: 0.85)”).
       - Do not add speculative or redundant subgoals.
 
 Important Rules:
 - Focus on expansions that will complete the task faster with high probability.
 - For AND nodes, ensure temporal order of children is correct and efficient.
-- Do not split notes into multiple atomic actions.
+- Do not split nodes into multiple atomic actions.
 - Use go_back after navigation when returning to a previous page is required.
-- If an action requires an element ID, include a valid ID as a string from the accessibility tree in round brackets, e.g. "click('123')".
+- If an action requires an element ID, include a valid ID as a string from the accessibility tree in round brackets.
 - Do not output anything outside the specified JSON format.
 
 Output must be valid JSON using one of the following formats:
@@ -337,16 +328,28 @@ Format 1 (node type ACTION):
   "reasoning": "Brief justification explaining why the node is classified as ACTION"
 }}
 
-Format 2 (node type AND or OR):
+Format 2 (node type AND):
 {{
   "node_id": "ID of the node here",
   "node_description": "Description of the node here",
-  "node_type": "AND or OR",
+  "node_type": "AND",
   "expansion": [
-    "Provide a textual description of the first subgoal or alternative strategy. If the subgoal is an action, provide only a general description of the action, not the actual element to perform the action on.",
-    "Provide a textual description of the second subgoal or alternative strategy. If the subgoal is an action, provide only a general description of the action, not the actual element to perform the action on."
+    "Provide a textual description of the first subgoal. If the subgoal is an action, provide only a general description of the action, not the actual element to perform the action on",
+    "Provide a textual description of the second subgoal. If the subgoal is an action, provide only a general description of the action, not the actual element to perform the action on"
   ],
-  "reasoning": "Brief justification explaining why the node is classified as AND or OR"
+  "reasoning": "Brief justification explaining why the node is classified as AND"
+}}
+
+Format 3 (node type OR):
+{{
+  "node_id": "ID of the node here",
+  "node_description": "Description of the node here",
+  "node_type": "OR",
+  "expansion": [
+    "Provide a textual description of the first scored alternative strategy. If the strategy is an action, provide only a general description of the action, not the actual element to perform the action on",
+    "Provide a textual description of the second scored alternative strategy. If the strategy is an action, provide only a general description of the action, not the actual element to perform the action on"
+  ],
+  "reasoning": "Brief justification explaining why the node is classified as OR"
 }}
 """
 
@@ -368,8 +371,8 @@ Format 2 (node type AND or OR):
                 ("TASK PROGRESS SUMMARY", _TextTrunkater(task_progress_summary, start_trunkate_iteration=4)),
                 ("NOTES SUMMARY", _TextTrunkater(notes_summary, start_trunkate_iteration=4)),
                 ("OBSERVATION", _TextTrunkater(observation, start_trunkate_iteration=2)),
-                ("node_id", node_id),
-                ("DESCRIPTION", node_description),
+                ("NODE ID", node_id),
+                ("NODE DESCRIPTION", node_description),
                 ("LOCAL TREE INFORMATION", _TextTrunkater(local_tree_info, start_trunkate_iteration=4)),
             ]
         )

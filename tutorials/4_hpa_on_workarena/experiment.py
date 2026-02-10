@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from bgym import DEFAULT_BENCHMARKS, HighLevelActionSetArgs
+from bgym import DEFAULT_BENCHMARKS
 from dotenv import load_dotenv
 
 import agentlab.agents.dynamic_prompting as dp

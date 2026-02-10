@@ -218,7 +218,10 @@ class HPA:
         task_description = node.description or goal or "Complete the task."
         observation = obs.get("axtree_txt") or obs.get("dom_txt") or obs.get("pruned_html") or ""
 
-        task_constraints = self._infer_task_constraints(task_description, observation)
+        if not self.task_constraints:
+            task_constraints = self._infer_task_constraints(task_description, observation)
+        else:
+            task_constraints = self.task_constraints
         obs_summary = self._infer_observation_summary(
             task_description=task_description,
             task_constraints=task_constraints,
@@ -251,7 +254,7 @@ class HPA:
         node.type = self._apply_expansion(node, expansion)
         return node
 
-    def _infer_task_constraints(self, task_description: str, observation: str) -> list[str]:
+    def _infer_task_constraints(self, task_description: str, observation: str | None = None) -> list[str]:
         system_message = TaskConstraintsPrompt.system_message
         user_message = TaskConstraintsPrompt.user_prompt(
             task_objective=task_description,
