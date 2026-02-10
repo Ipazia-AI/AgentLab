@@ -98,7 +98,10 @@ Example output:
         return _ShrinkableUserMessage(
             [
                 ("QUERY", task_objective),
-                ("WEB PAGE CONTENT", _TextTrunkater(current_observation, start_trunkate_iteration=2)),
+                (
+                    "WEB PAGE CONTENT",
+                    _TextTrunkater(current_observation, start_trunkate_iteration=2),
+                ),
             ]
         )
 
@@ -163,7 +166,10 @@ Example:
                 ("TASK DESCRIPTION", task_description),
                 ("TASK CONSTRAINTS", task_constraints),
                 ("TASK PROGRESS SUMMARY", task_progress_summary),
-                ("OBSERVATION HISTORY", _TextTrunkater(observation_history, start_trunkate_iteration=4)),
+                (
+                    "OBSERVATION HISTORY",
+                    _TextTrunkater(observation_history, start_trunkate_iteration=4),
+                ),
                 ("ACTION HISTORY", _TextTrunkater(action_history, start_trunkate_iteration=4)),
                 ("NOTES SUMMARY", _TextTrunkater(notes_summary, start_trunkate_iteration=4)),
                 ("CURRENT OBSERVATION", _TextTrunkater(observation, start_trunkate_iteration=2)),
@@ -278,33 +284,32 @@ You are an efficient logical (AND/OR) tree constructing agent specialized in web
 You dynamically construct AND/OR planning trees from observations of the webpage’s accessibility tree structure for efficient and robust task execution.
 
 You are provided:
-- Root-level task description
-- Task constraints
-- Webpage's accessibility tree as the observation
-- ID and description of the node to analyze
-- Summary of current task progress
-- Summary of notes taken so far
-- Information about the node’s siblings and the node parent’s siblings
+- TASK DESCRIPTION: a textual description of the task to complete
+- TASK CONSTRAINTS: a list of constraints that must be satisfied to complete the task
+- TASK PROGRESS SUMMARY: a summary of the current task progress
+- NOTES SUMMARY: a summary of the notes taken so far
+- OBSERVATION: the current observation of the webpage's accessibility tree
+- NODE INFORMATIONS:
+    - node_id: the ID of the node to analyze
+    - node_description: the description of the node to analyze
+    - local_tree_info: information about the node’s siblings and the node parent’s siblings
 
-Possible Node Types:
+
+There are three possible node types that can be used to construct the tree:
 - AND Node: Represents an ordered list of logical subgoals required to achieve the node’s objective.
 - OR Node: Represents alternative sub-strategies (which can be other AND/OR nodes).
 - ACTION Node: Single executable action strictly matching one element of the list of browser actions below.
 
-Node status indicators:
-- VISITED
-- UNVISITED
-- PRUNED
-- SUCCESS
-- FAIL
 
 {self.action_prompt}
+
+------------------------------------------------------------------------------------------------
 
 Your task for the given node:
 1. Determine whether the node is an AND node, an OR node, or an ACTION node.
 2. Choose ONE of the following options:
    A. Mark node as ACTION if the goal can be achieved using a single atomic action from the list above.
-   B. Expand the node if the goal is not atomic and requires a sequence of atomic actions.
+   B. Expand the node if the goal cannot be solved by performing a single atomic action.
       - For AND nodes, provide the ordered list of logical subgoals.
       - For OR nodes, provide a list of alternative strategies ordered by likelihood of success, including a (0–1) score in each string (e.g., “Strategy here (score: 0.85)”).
       - Do not add speculative or redundant subgoals.
@@ -312,9 +317,6 @@ Your task for the given node:
 Important Rules:
 - Focus on expansions that will complete the task faster with high probability.
 - For AND nodes, ensure temporal order of children is correct and efficient.
-- Do not split nodes into multiple atomic actions.
-- Use go_back after navigation when returning to a previous page is required.
-- If an action requires an element ID, include a valid ID as a string from the accessibility tree in round brackets.
 - Do not output anything outside the specified JSON format.
 
 Output must be valid JSON using one of the following formats:
@@ -366,14 +368,20 @@ Format 3 (node type OR):
     ) -> dp.Shrinkable:
         return _ShrinkableUserMessage(
             [
-                ("ROOT-LEVEL TASK DESCRIPTION", task_description),
+                ("TASK DESCRIPTION", task_description),
                 ("TASK CONSTRAINTS", task_constraints),
-                ("TASK PROGRESS SUMMARY", _TextTrunkater(task_progress_summary, start_trunkate_iteration=4)),
+                (
+                    "TASK PROGRESS SUMMARY",
+                    _TextTrunkater(task_progress_summary, start_trunkate_iteration=4),
+                ),
                 ("NOTES SUMMARY", _TextTrunkater(notes_summary, start_trunkate_iteration=4)),
                 ("OBSERVATION", _TextTrunkater(observation, start_trunkate_iteration=2)),
-                ("NODE ID", node_id),
-                ("NODE DESCRIPTION", node_description),
-                ("LOCAL TREE INFORMATION", _TextTrunkater(local_tree_info, start_trunkate_iteration=4)),
+                ("node_id", node_id),
+                ("node_description", node_description),
+                (
+                    "local_tree_info",
+                    _TextTrunkater(local_tree_info, start_trunkate_iteration=4),
+                ),
             ]
         )
 
@@ -482,6 +490,7 @@ Example:
   }
 }}
 """
+
     @staticmethod
     def user_prompt(
         task_description: str,
@@ -495,10 +504,16 @@ Example:
             [
                 ("ROOT-LEVEL TASK DESCRIPTION", task_description),
                 ("TASK CONSTRAINTS", task_constraints),
-                ("TASK PROGRESS SUMMARY", _TextTrunkater(task_progress_summary, start_trunkate_iteration=4)),
+                (
+                    "TASK PROGRESS SUMMARY",
+                    _TextTrunkater(task_progress_summary, start_trunkate_iteration=4),
+                ),
                 ("NOTES SUMMARY", _TextTrunkater(notes_summary, start_trunkate_iteration=4)),
                 ("OBSERVATION", _TextTrunkater(observation, start_trunkate_iteration=2)),
-                ("GLOBAL TREE INFORMATION", _TextTrunkater(global_tree_info, start_trunkate_iteration=4)),
+                (
+                    "GLOBAL TREE INFORMATION",
+                    _TextTrunkater(global_tree_info, start_trunkate_iteration=4),
+                ),
             ]
         )
 
