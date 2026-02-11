@@ -104,10 +104,6 @@ class HPAAgent(GenericAgent):
         # Include goal and action history for user visibility
         chat_messages = Discussion()
 
-        # Add system message with goal
-        system_content = f"Goal: {goal}\n\nYou are using AND/OR tree to select actions."
-        chat_messages.add_message(SystemMessage(system_content))
-
         # Add user message with current observation context (if available)
         if obs.get("chat_messages"):
             # Browsergym chat_messages use format: {'role': str, 'message': str, 'timestamp': float}
