@@ -32,16 +32,20 @@ class SimplifiedRDDPlanner:
     focused on web agent task planning.
     """
     
-    def __init__(self, llm: Any, config: RDDConfig):
+    def __init__(self, llm: Any, config: RDDConfig, action_set: Any):
         """
-        Initialize the RDD planner with an LLM and configuration.
+        Initialize the RDD planner with an LLM, configuration, and action set.
 
-        The `llm` should be a callable compatible with AgentLab chat models:
-        it must accept a list of messages (or a `Discussion`) and return an
-        object with a `"content"` field containing the assistant reply.
+        Args:
+            llm: A callable compatible with AgentLab chat models that accepts a list 
+                 of messages (or a Discussion) and returns an object with a "content" 
+                 field containing the assistant reply.
+            config: Configuration for the planner (max_depth, max_nodes, etc.)
+            action_set: Action set object defining available actions for the agent
         """
         self.llm = llm  # Language model for generating decompositions and solutions
         self.config = config  # Configuration (max_depth, max_nodes, etc.)
+        self.action_set = action_set  # Available actions (fixed for this planner instance)
         
         # Cache of all problems/tasks in the decomposition tree
         # Key: problem_id (e.g., "task_1"), Value: problem dict with description, subtasks, solution, etc.
@@ -139,6 +143,41 @@ class SimplifiedRDDPlanner:
 ```
 """
     
+    def _format_action_set_context(self) -> str:
+        """
+        Format the action set for inclusion in prompts.
+        
+        Returns:
+            Formatted action set context string
+        """
+        # action_set is set in __init__, so it should always exist
+        
+        # Try to get a string representation of available actions
+        action_desc = ""
+        
+        # Check if action_set has a describe() method
+        if hasattr(self.action_set, 'describe'):
+            action_desc = self.action_set.describe()
+        # Check if action_set has a to_string() method
+        elif hasattr(self.action_set, 'to_string'):
+            action_desc = self.action_set.to_string()
+        # Check if action_set has __str__ implemented
+        elif hasattr(self.action_set, '__str__'):
+            action_desc = str(self.action_set)
+        # Fallback: try to get action names from common attributes
+        else:
+            if hasattr(self.action_set, 'action_names'):
+                action_desc = "Available actions:\n" + "\n".join(f"- {a}" for a in self.action_set.action_names)
+            elif hasattr(self.action_set, 'actions'):
+                action_desc = "Available actions:\n" + "\n".join(f"- {a}" for a in self.action_set.actions)
+            else:
+                # Last resort: just show the type
+                action_desc = f"Action set type: {type(self.action_set).__name__}"
+        
+        # Return the action description directly without wrapping in backticks
+        # (the action_set.__str__() already includes proper formatting)
+        return action_desc
+    
     def plan(self, task: str, state: str, axtree: str = None, html: str = None) -> dict:
         """
         Generate a hierarchical plan for the given task using BFS with dependencies.
@@ -167,7 +206,7 @@ class SimplifiedRDDPlanner:
         self.problems_cache = {}
         self.id_counter = 0
         
-        # Store axtree and html for use in prompts
+        # Store axtree and html for use in prompts (action_set is already set in __init__)
         self.axtree = axtree
         self.html = html
         
@@ -267,6 +306,7 @@ class SimplifiedRDDPlanner:
                 unit_statement=self.config.unit_statement,  # What to output for unit problems
                 axtree_context=self._format_axtree_context(),  # Page structure
                 html_context=self._format_html_context(),      # Page HTML
+                action_set_description=self._format_action_set_context(),  # Available actions
                 ancestors="",                        # Parent task context (empty for now)
                 examples=""                          # Few-shot examples (empty for now)
             )
@@ -547,6 +587,7 @@ class SimplifiedRDDPlanner:
             state=state,                     # Current state
             axtree_context=self._format_axtree_context(),  # Page structure
             html_context=self._format_html_context(),      # Page HTML
+            action_set_description=self._format_action_set_context(),  # Available actions
             ancestors="",                    # Parent context (empty for now)
             examples=""                      # Few-shot examples (empty for now)
         )

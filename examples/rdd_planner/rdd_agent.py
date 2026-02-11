@@ -164,9 +164,12 @@ class RDDAgentArgs(GenericAgentArgs):
         # Already a natural-language task - no AXTree, HTML, or obs available
         return self.task, None, None, self.initial_state
     
-    def _generate_plan(self) -> str:
+    def _generate_plan(self, action_set) -> str:
         """
         Generate and optionally refine an RDD plan.
+        
+        Args:
+            action_set: Action set to initialize the planner with
         
         Returns:
             The final plan string (refined if use_plan_refiner is enabled)
@@ -176,10 +179,10 @@ class RDDAgentArgs(GenericAgentArgs):
         # Resolve task into planning context (goal + axtree + html + state)
         planning_task, axtree_flat, html, state_desc = self._resolve_planning_context()
         
-        # Initialize planner and LLM
+        # Initialize planner with LLM, config, and action_set
         planner_config = RDDConfig(max_depth=2, max_nodes=20)
         llm = self.chat_model_args.make_model()
-        planner = SimplifiedRDDPlanner(llm, planner_config)
+        planner = SimplifiedRDDPlanner(llm, planner_config, action_set)
         
         # Generate initial plan
         print(f"Task: {planning_task}")
@@ -246,7 +249,8 @@ class RDDAgentArgs(GenericAgentArgs):
         
         # Generate and store plan if task is set AND planning is enabled
         if self.task and self.flags.use_plan:
-            agent.plan = self._generate_plan()
+            # Pass the agent's action_set to the planner
+            agent.plan = self._generate_plan(action_set=agent.action_set)
         elif self.task and not self.flags.use_plan:
             print("⚠ Planning disabled (use_plan=False), skipping RDD planning\n")
         else:
