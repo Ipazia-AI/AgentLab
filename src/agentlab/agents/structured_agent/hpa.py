@@ -149,7 +149,7 @@ class HPA:
         if node.type == NodeType.ACTION:
             if node.status in {NodeStatus.FAIL, NodeStatus.PRUNED}:
                 self.stack.append((node, NodeState.FAILED))
-            return
+                return
         else:
             node.status = NodeStatus.SUCCESS
 
