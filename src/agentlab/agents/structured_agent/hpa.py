@@ -77,7 +77,7 @@ class HPA:
                 continue
 
             if state == NodeState.ENTERING:
-                processed_node = self._process_node_entering(node, goal, obs)
+                processed_node = self._process_node_entering(node, obs)
                 if processed_node.type == NodeType.ACTION:
                     return processed_node
 
@@ -93,17 +93,20 @@ class HPA:
 
         return None
 
-    def finalize_action(self, node: Node, obs: dict, success: bool = False):
-        success = True if obs.get("last_action_error") == "" else False
+    def finalize_action(self, node: Node, obs: dict):
+        action_error = obs.get("last_action_error")
+        success = True if action_error == "" else False
         if success:
-            self._global_tree_update()
-            self._update_observations(node, obs)
             node.status = NodeStatus.SUCCESS
         else:
             node.status = NodeStatus.FAIL
+            node.action_error = action_error
+
+        self._global_tree_update()
+        self._update_observations(node, obs)
 
     # Algo 2 from the HPA paper
-    def _process_node_entering(self, node: Node, goal: str | None, obs: dict) -> Node:
+    def _process_node_entering(self, node: Node, obs: dict) -> Node:
         if node.parent and node.parent.type == NodeType.OR:
             # TODO: The role of this function is not clear, let's check it later what it is supposed to do.
             self._rollback_context(node.parent)
@@ -113,7 +116,7 @@ class HPA:
         node.execution_count += 1
 
         if node.type == NodeType.UNKNOWN:
-            self._expand_node(node, goal, obs)
+            self._expand_node(node, obs)
             self.stack.append((node, NodeState.EXITING))
 
         if node.type == NodeType.ACTION:
@@ -209,14 +212,14 @@ class HPA:
                     node.status = NodeStatus.PRUNED
                     self._propagate_failure(node)
 
-    def _expand_node(self, node: Node, goal: str | None, obs: dict) -> Node:
+    def _expand_node(self, node: Node, obs: dict) -> Node:
         if self.chat_llm is None:
             node.description = "report_infeasible"
             node.metadata["node_description"] = "LLM not available"
             node.type = NodeType.ACTION
             return node
 
-        task_description = node.description or goal or "Complete the task."
+        task_description = node.description or "Complete the task."
         observation = obs.get("axtree_txt") or obs.get("dom_txt") or obs.get("pruned_html") or ""
 
         if not self.task_constraints:
@@ -456,8 +459,13 @@ class HPA:
         observation = obs.get("axtree_txt") or obs.get("dom_txt") or obs.get("pruned_html")
         if observation:
             self.observation_history.append(observation)
-        if node.type == NodeType.ACTION and node.description:
-            self.action_history.append(node.description)
+        if node.type == NodeType.ACTION:
+            action_history_text = f"{node.id}: {node.description}; Playwright Action: {node.action}"
+            if node.action_error:
+                action_history_text += f"; Error: {node.action_error}"
+            else:
+                action_history_text += "; SUCCESS"
+            self.action_history.append(action_history_text)
 
     def _propagate_failure(self, node: Node):
         parent = node.parent

@@ -32,6 +32,7 @@ class Node(BaseModel):
     status: NodeStatus = NodeStatus.UNVISITED
     description: str
     action: str | None = None
+    action_error: str | None = None
 
     parent: Optional["Node"] = None
     children: list["Node"] = Field(default_factory=list)
