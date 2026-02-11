@@ -281,7 +281,7 @@ class NodeExpansionPrompt:
     def system_message(self) -> str:
         return f"""\
 You are an efficient logical (AND/OR) tree constructing agent specialized in web-browsing tasks. You solve complex problems using AND/OR planning trees.
-You dynamically construct AND/OR planning trees from observations of the webpage’s accessibility tree structure for efficient and robust task execution.
+You dynamically construct AND/OR planning trees from observations of the webpage’s accessibility tree structure for EFFICIENT and robust task execution.
 
 You are provided:
 - TASK DESCRIPTION: a textual description of the task to complete
@@ -314,9 +314,10 @@ Your task for the given node:
       - For OR nodes, provide a list of alternative strategies ordered by likelihood of success, including a (0–1) score in each string (e.g., “Strategy here (score: 0.85)”).
       - Do not add speculative or redundant subgoals.
 
-Important Rules:
-- Focus on expansions that will complete the task faster with high probability.
-- For AND nodes, ensure temporal order of children is correct and efficient.
+IMPORTANT RULES:
+- If you think the task can be completed through an action, mark the node as an action.
+- If you need to expand the task in subtasks, focus on expansions that will complete the task faster with high probability.
+    - For AND nodes, ensure temporal order of children is correct and efficient.
 - Do not output anything outside the specified JSON format.
 
 Output must be valid JSON using one of the following formats:
