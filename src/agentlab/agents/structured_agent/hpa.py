@@ -42,6 +42,7 @@ class HPA:
         self.max_revision_count = max_revision_count
         self.max_prompt_tokens = max_prompt_tokens
         self.max_trunc_itr = max_trunc_itr
+        self.root_node: Node = Node(type=NodeType.UNKNOWN, description="")
         self.stack: List[Tuple[Node, NodeState]] = []
         self._counter = 0
         self.task_constraints: list[str] = []
@@ -53,6 +54,7 @@ class HPA:
 
     def reset(self):
         self._counter = 0
+        self.root_node = Node(type=NodeType.UNKNOWN, description="")
         self.stack = []
         self.task_constraints = []
         self.task_progress_summary = None
@@ -64,7 +66,8 @@ class HPA:
     def run_until_action(self, goal: str | None, obs: dict) -> Node | None:
 
         if self._counter == 0:
-            self.stack = [(Node(type=NodeType.UNKNOWN, description=goal), NodeState.ENTERING)]
+            self.root_node.description = goal
+            self.stack = [(self.root_node, NodeState.ENTERING)]
 
         while self.stack:
             node, state = self.stack.pop()
@@ -102,7 +105,7 @@ class HPA:
             node.status = NodeStatus.FAIL
             node.action_error = action_error
 
-        self._global_tree_update()
+        # self._global_tree_update()
         self._update_observations(node, obs)
 
     # Algo 2 from the HPA paper
@@ -438,6 +441,20 @@ class HPA:
 
     def _set_context(self, node: Node):
         pass
+
+    def _get_global_tree(self) -> list[Node]:
+        if not getattr(self, "root_node", None):
+            return []
+        global_tree = []
+        def walk_tree(node: Node):
+            if node.status == NodeStatus.DELETED:
+                return
+            global_tree.append(node)
+            for child in node.children:
+                walk_tree(child)
+        walk_tree(self.root_node)
+        global_tree.sort(key=lambda n: (n.id,))
+        return global_tree
 
     def _global_tree_update(self, task_description: str, task_constraints: list[str], observation: str) -> None: # TODO: Should return the updated global tree: a list of nodes ordered by their ids
         system_message = GlobalTreeUpdatePrompt(self.action_set, self.action_flags).system_message()
