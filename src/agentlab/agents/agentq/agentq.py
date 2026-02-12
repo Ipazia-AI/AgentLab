@@ -5,6 +5,7 @@ from datetime import datetime
 from agentlab.agents.agentq.evaluators import AbsoluteCritic, TournamentCritic
 from agentlab.agents.agentq.mcts import MCTS
 from agentlab.agents.agentq.selectors import AheadKSelector, MaxVisitSelector
+from agentlab.agents.rollouts.rollout.env_access import get_browser_and_context
 from agentlab.agents.generic_agent.generic_agent import (
     AgentInfo,
     GenericAgent,
@@ -41,6 +42,9 @@ class AgentQArgs(GenericAgentArgs):
     iteration_timeout: float | None = None  # Timeout per MCTS iteration (seconds)
     mcts_debug_logging: bool = False  # Enable DEBUG logs for MCTS
     browser_fork_logging: bool = False  # Enable browser_forking INFO logs
+    use_tab_instead_of_fork: bool = False  # Use browser tabs instead of forked browser
+    use_shared_tab_context: bool = False  # One browser, group of pages per expand
+    mcts_headless: bool = True  # Headless for MCTS shared browser; set False to see it when debugging
 
     def __post_init__(self):
         """Override parent to set correct agent name."""
@@ -70,6 +74,9 @@ class AgentQArgs(GenericAgentArgs):
             iteration_timeout=self.iteration_timeout,
             mcts_debug_logging=self.mcts_debug_logging,
             browser_fork_logging=self.browser_fork_logging,
+            use_tab_instead_of_fork=self.use_tab_instead_of_fork,
+            use_shared_tab_context=self.use_shared_tab_context,
+            mcts_headless=self.mcts_headless,
         )
 
 
@@ -105,6 +112,9 @@ class AgentQ(GenericAgent):
         iteration_timeout: float | None = None,
         mcts_debug_logging: bool = False,
         browser_fork_logging: bool = False,
+        use_tab_instead_of_fork: bool = False,
+        use_shared_tab_context: bool = False,
+        mcts_headless: bool = True,
     ):
         super().__init__(chat_model_args, flags, max_retry)
         self.mcts_budget = mcts_budget
@@ -120,6 +130,9 @@ class AgentQ(GenericAgent):
         self.iteration_timeout = iteration_timeout
         self.mcts_debug_logging = mcts_debug_logging
         self.browser_fork_logging = browser_fork_logging
+        self.use_tab_instead_of_fork = use_tab_instead_of_fork
+        self.use_shared_tab_context = use_shared_tab_context
+        self.mcts_headless = mcts_headless
 
         # Instantiate modular components
         critic = (
@@ -149,6 +162,9 @@ class AgentQ(GenericAgent):
             sync_mcts=sync_mcts,
             iteration_timeout=iteration_timeout,
             debug_logging=mcts_debug_logging,
+            use_tab_instead_of_fork=use_tab_instead_of_fork,
+            use_shared_tab_context=use_shared_tab_context,
+            headless=mcts_headless,
         )
 
         if not browser_fork_logging:
@@ -157,6 +173,12 @@ class AgentQ(GenericAgent):
         # Buffer for in-context DPO learning (preference pairs from tree)
         self.dpo_pairs = []
         self.max_dpo_pairs = 20
+        # Optional: env set by loop so root and children can use same browser
+        self._task_env = None
+
+    def set_task_env(self, env):
+        """Set the task environment so MCTS can use its browser context (root and children in same browser)."""
+        self._task_env = env
 
     def reset(self, seed=None):
         """Reset agent state, including DPO pairs buffer."""
@@ -190,6 +212,9 @@ class AgentQ(GenericAgent):
         history_strings = [a if isinstance(a, str) else a.get("text", str(a)) for a in self.actions]
 
         # Run MCTS Search with DPO pairs for in-context learning
+        external_context = None
+        if self._task_env is not None and self.use_shared_tab_context:
+            _, external_context = get_browser_and_context(self._task_env)
         logger.info(
             f"AgentQ | Starting MCTS search | Budget: {self.mcts_budget} | Workers: {self.mcts_max_workers} | DPO pairs: {len(self.dpo_pairs)} | Time: {datetime.now().strftime('%H:%M:%S')}"
         )
@@ -200,6 +225,7 @@ class AgentQ(GenericAgent):
             budget=self.mcts_budget,
             dpo_pairs=self.dpo_pairs,
             max_workers=self.mcts_max_workers,
+            external_context=external_context,
         )
 
         if not best_action:

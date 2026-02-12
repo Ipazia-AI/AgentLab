@@ -66,7 +66,7 @@ agent_args = AgentQArgs(
     chat_model_args=chat_args,
     flags=flags,
     mcts_budget=3,
-    mcts_max_workers=1,  # Sequential for better debugging
+    mcts_max_workers=2,  # Parallel search; checkpointing allows isolated worker state
     mcts_rollout_depth=2,
     critic_type="tournament",  # "tournament" | "absolute"
     selection_strategy="max_visit",  # "max_visit" | "ahead_k"
@@ -74,6 +74,9 @@ agent_args = AgentQArgs(
     use_real_rollouts=False,  # False=fast_reward (paper default), True=real browser rollouts
     sync_mcts=False,
     iteration_timeout=None,
+    use_tab_instead_of_fork=True,   # Use browser tabs instead of forked browser
+    use_shared_tab_context=True,   # One browser, group of pages per expand (K tabs per expand, then close)
+    mcts_headless=True,   # Set False to show the MCTS simulation browser window when debugging
     # Debug/logging toggles
     mcts_debug_logging=False,  # Enables DEBUG timing/heartbeat logs
     browser_fork_logging=False,  # Enables browser_forking INFO logs
@@ -91,6 +94,10 @@ try:
     # )
 except (AttributeError, Exception) as e:
     logger.warning(f"Could not filter benchmark: {e}. Running full benchmark if needed.")
+
+# Show the main evaluation browser (no headless)
+for env_args in benchmark.env_args_list:
+    env_args.headless = False
 
 # 4. Run Study
 n_jobs = 1  # 1 job for sequential execution

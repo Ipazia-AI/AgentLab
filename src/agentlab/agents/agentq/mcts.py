@@ -23,6 +23,12 @@ from agentlab.agents.browser_forking import (
     execute_action_in_fork,
 )
 from agentlab.agents.generic_agent.generic_agent_prompt import GenericPromptFlags
+from agentlab.agents.agentq.tab_execution import (
+    browser_tab_and_rollout,
+    create_shared_context,
+    execute_action_in_tab,
+    get_url_from_obs,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -131,6 +137,8 @@ class MCTS:
         sync_mcts: bool = False,
         iteration_timeout: Optional[float] = None,
         debug_logging: bool = False,
+        use_tab_instead_of_fork: bool = False,
+        use_shared_tab_context: bool = False,
     ):
         """
         Initialize MCTS with mixed Q-value support.
@@ -167,11 +175,21 @@ class MCTS:
         self.alpha = alpha
         self.q_threshold = q_threshold
         self.action_timeout = action_timeout
+        self.effective_timeout = action_timeout
         self.timeout_penalty = timeout_penalty
         self.action_timeouts: dict[str, int] = {}
         self.sync_mcts = sync_mcts
         self.iteration_timeout = iteration_timeout
         self.debug_logging = debug_logging
+        self.use_tab_instead_of_fork = use_tab_instead_of_fork
+        self.use_shared_tab_context = use_shared_tab_context and use_tab_instead_of_fork
+
+        # Shared browser context for "one browser, group of pages per expand"
+        self._shared_tab_playwright = None
+        self._shared_tab_browser = None
+        self._shared_tab_context = None
+        self._shared_tab_lock = None
+        self._owns_shared_context = False  # False when using env's context (external)
 
         # Modular Evaluator/Selector
         self.critic = critic or AbsoluteCritic(critique_llm)
@@ -191,6 +209,29 @@ class MCTS:
             return
         elapsed = time.perf_counter() - start_time
         logger.debug("MCTS | Timing | %s: %.3fs", label, elapsed)
+
+    def _close_shared_tab_context(self) -> None:
+        """Close shared browser context and clear references. Only close browser/playwright if we own them (not when using env's context)."""
+        if self._shared_tab_browser or self._shared_tab_context:
+            if self._owns_shared_context:
+                logger.info("MCTS | Closing shared browser (simulations context).")
+            else:
+                logger.info("MCTS | Releasing reference to env browser context (not closing).")
+        if self._owns_shared_context and self._shared_tab_browser:
+            try:
+                self._shared_tab_browser.close()
+            except Exception as e:
+                logger.debug("Error closing shared tab browser: %s", e)
+            self._shared_tab_browser = None
+        if self._owns_shared_context and self._shared_tab_playwright:
+            try:
+                self._shared_tab_playwright.stop()
+            except Exception as e:
+                logger.debug("Error stopping shared tab playwright: %s", e)
+            self._shared_tab_playwright = None
+        self._shared_tab_context = None
+        self._shared_tab_lock = None
+        self._owns_shared_context = False
 
     def _obs_cache_key(self, obs: Optional[dict]) -> str:
         if not obs:
@@ -224,9 +265,14 @@ class MCTS:
         budget: int = 5,
         dpo_pairs: list[dict] = None,
         max_workers: int = 4,
+        external_context=None,
     ):
         """
         Run MCTS search with parallel iterations.
+
+        If external_context (Playwright BrowserContext) is provided and use_shared_tab_context
+        is True, root and children run in the same browser as the task env; otherwise MCTS
+        creates its own browser for simulations.
         """
         logger.info(
             f"MCTS Search started | Budget: {budget} | Max workers: {max_workers} | Goal: {goal[:60]}... | Time: {datetime.now().strftime('%H:%M:%S')}"
@@ -235,7 +281,40 @@ class MCTS:
         root = MCTSNode(obs=root_obs, history=root_history)
         root.visits = 1
 
-        if self.sync_mcts or os.environ.get("AGENTQ_SYNC_MCTS") == "1":
+        effective_url = get_url_from_obs(root_obs) if root_obs else ""
+        if (self.use_shared_tab_context or self.use_tab_instead_of_fork) and root_obs and effective_url:
+            self._shared_tab_lock = threading.Lock()
+            if external_context is not None:
+                self._shared_tab_context = external_context
+                self._shared_tab_playwright = None
+                self._shared_tab_browser = None
+                self._owns_shared_context = False
+                logger.info(
+                    "MCTS | Using env browser context for simulations (root and children in same browser)."
+                )
+            else:
+                start_obs_for_ctx = {"url": effective_url}
+                pw, br, ctx = create_shared_context(start_obs_for_ctx, headless=self.headless)
+                self._shared_tab_playwright = pw
+                self._shared_tab_browser = br
+                self._shared_tab_context = ctx
+                self._owns_shared_context = True
+                if ctx is not None:
+                    logger.info(
+                        "MCTS | Created shared browser for simulations (headless=%s); root is in env browser.",
+                        self.headless,
+                    )
+
+        use_sync_path = (
+            self.sync_mcts
+            or os.environ.get("AGENTQ_SYNC_MCTS") == "1"
+            or (external_context is not None)
+        )
+        if use_sync_path:
+            if external_context is not None:
+                logger.info(
+                    "MCTS | Using env browser context: running iterations on main thread (Playwright sync API is single-threaded)."
+                )
             for i in range(budget):
                 logger.info(
                     "MCTS | Running iteration %s/%s synchronously | Time: %s",
@@ -330,6 +409,8 @@ class MCTS:
                     f"MCTS | All {completed}/{budget} iterations completed | Time: {datetime.now().strftime('%H:%M:%S')}"
                 )
 
+        self._close_shared_tab_context()
+
         # Select best action
         best_child = self.selector.select(root)
         if not best_child and root.children:
@@ -400,7 +481,6 @@ class MCTS:
                 unvisited = [c for c in leaf.children if c.visits == 0]
 
             if unvisited:
-                # Parallel simulation of children
                 if sim_executor is None:
                     logger.debug("MCTS | Simulate children sequentially (no sim executor)")
                     for child in unvisited:
@@ -813,19 +893,40 @@ function_name('element_id')
         # Shorter timeout for faster failure detection
         rollout_timeout = self.action_timeout * (rollout_depth + 1) * 2
 
-        first_obs, cumulative_reward = browser_fork_and_rollout(
-            start_obs=parent_obs,
-            initial_action=action,
-            action_set=self.action_set,
-            obs_flags=self.obs_flags,
-            goal=goal,
-            rollout_depth=rollout_depth,
-            action_generator=generate_action,
-            critique_fn=critique_action,
-            terminal_fn=check_terminal,
-            headless=self.headless,
-            timeout=rollout_timeout,
-        )
+        if (
+            self.use_tab_instead_of_fork
+            and self._shared_tab_context is not None
+            and self._shared_tab_lock is not None
+        ):
+            first_obs, cumulative_reward = browser_tab_and_rollout(
+                self._shared_tab_context,
+                self._shared_tab_lock,
+                start_obs=parent_obs,
+                initial_action=action,
+                action_set=self.action_set,
+                obs_flags=self.obs_flags,
+                goal=goal,
+                rollout_depth=rollout_depth,
+                action_generator=generate_action,
+                critique_fn=critique_action,
+                terminal_fn=check_terminal,
+                headless=self.headless,
+                timeout=rollout_timeout,
+            )
+        else:
+            first_obs, cumulative_reward = browser_fork_and_rollout(
+                start_obs=parent_obs,
+                initial_action=action,
+                action_set=self.action_set,
+                obs_flags=self.obs_flags,
+                goal=goal,
+                rollout_depth=rollout_depth,
+                action_generator=generate_action,
+                critique_fn=critique_action,
+                terminal_fn=check_terminal,
+                headless=self.headless,
+                timeout=rollout_timeout,
+            )
 
         if first_obs is None:
             self._record_timeout(action)
@@ -844,14 +945,30 @@ function_name('element_id')
         - False: LLM critique score (0.0-1.0) for dense feedback
         """
         exec_start = time.perf_counter()
-        new_obs, error = execute_action_in_fork(
-            start_obs=start_obs,
-            action=action,
-            action_set=self.action_set,
-            obs_flags=self.obs_flags,
-            headless=self.headless,
-            timeout=effective_timeout,
-        )
+        if (
+            self.use_tab_instead_of_fork
+            and self._shared_tab_context is not None
+            and self._shared_tab_lock is not None
+        ):
+            new_obs, error = execute_action_in_tab(
+                self._shared_tab_context,
+                self._shared_tab_lock,
+                start_obs=start_obs,
+                action=action,
+                action_set=self.action_set,
+                obs_flags=self.obs_flags,
+                headless=self.headless,
+                timeout=self.effective_timeout,
+            )
+        else:
+            new_obs, error = execute_action_in_fork(
+                start_obs=start_obs,
+                action=action,
+                action_set=self.action_set,
+                obs_flags=self.obs_flags,
+                headless=self.headless,
+                timeout=self.effective_timeout,
+            )
         self._log_timing("env_action_execute", exec_start)
 
         if new_obs is None or error:
@@ -869,8 +986,8 @@ function_name('element_id')
                     logger.debug(f"Action execution failed (expected): {action} - {error[:100]}")
                 else:
                     logger.warning(f"Action execution failed: {action} - {error[:100]}")
-            return None, 0.0
-        
+            return None, 0.0, error
+
         if self.use_env_reward:
             # Paper-faithful: use sparse environment reward (0 or 1)
             env_reward = new_obs.get("metadata", {}).get("reward", 0.0)
