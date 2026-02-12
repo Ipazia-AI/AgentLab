@@ -44,22 +44,20 @@ class HPA:
         self.max_trunc_itr = max_trunc_itr
         self.stack: List[Tuple[Node, NodeState]] = []
         self._counter = 0
+        self.action_history: list[str] = []
         self.task_constraints: list[str] = []
         self.task_progress_summary: str | None = None
-        self.notes_summary: str | None = None
         self.observation_history: list[str] = []
-        self.action_history: list[str] = []
-        self.task_feedback: str | None = None
+        self.previous_notes: str | None = None
 
     def reset(self):
         self._counter = 0
         self.stack = []
+        self.action_history = []
         self.task_constraints = []
         self.task_progress_summary = None
-        self.notes_summary = None
+        self.previous_notes = None
         self.observation_history = []
-        self.action_history = []
-        self.task_feedback = None
 
     def run_until_action(self, goal: str | None, obs: dict) -> Node | None:
 
@@ -102,7 +100,7 @@ class HPA:
             node.status = NodeStatus.FAIL
             node.action_error = action_error
 
-        self._global_tree_update()
+        # self._global_tree_update()
         self._update_observations(node, obs)
 
     # Algo 2 from the HPA paper
@@ -223,18 +221,27 @@ class HPA:
         observation = obs.get("axtree_txt") or obs.get("dom_txt") or obs.get("pruned_html") or ""
 
         if not self.task_constraints:
-            task_constraints = self._infer_task_constraints(task_description, observation)
+            task_constraints = self._infer_task_constraints(
+                goal=task_description,
+                current_observation=observation,
+            )
         else:
             task_constraints = self.task_constraints
         obs_summary = self._infer_observation_summary(
             task_description=task_description,
             task_constraints=task_constraints,
             observation=observation,
+            observation_history=self.observation_history or None,
+            action_history=self.action_history or None,
+            notes_summary=self.previous_notes or None,
         )
         notes_summary = self._infer_notes_summary(
             task_description=task_description,
             task_constraints=task_constraints,
             observation=observation,
+            action_history=self.action_history or None,
+            task_progress_summary=self.task_progress_summary or None,
+            notes_summary=self.previous_notes or None,
         )
         # TODO: Check if we need to add obs and notes to the inference
         expansion = self._infer_node_expansion(
@@ -249,8 +256,6 @@ class HPA:
                 "task_constraints": task_constraints,
                 "observation_summary": obs_summary.get("observation_summary"),
                 "observation_highlights": obs_summary.get("observation_highlights"),
-                "task_progress": obs_summary.get("task_progress"),
-                "task_feedback": obs_summary.get("task_feedback"),
                 "notes_summary": notes_summary.get("new_notes"),
             }
         )
@@ -258,11 +263,13 @@ class HPA:
         node.type = self._apply_expansion(node, expansion)
         return node
 
-    def _infer_task_constraints(self, task_description: str, observation: str | None = None) -> list[str]:
+    def _infer_task_constraints(
+        self, goal: str, current_observation: str | None = None
+    ) -> list[str]:
         system_message = TaskConstraintsPrompt.system_message
         user_message = TaskConstraintsPrompt.user_prompt(
-            task_objective=task_description,
-            current_observation=observation,
+            goal=goal,
+            current_observation=current_observation,
         )
         result = self._call_json_prompt(system_message, user_message)
         constraints = result.get("task_constraints", [])
@@ -276,20 +283,20 @@ class HPA:
         task_description: str,
         task_constraints: list[str],
         observation: str,
+        observation_history: list[str],
+        action_history: list[str],
+        notes_summary: str,
     ) -> dict:
         system_message = ObservationSummaryPrompt.system_message
         user_message = ObservationSummaryPrompt.user_prompt(
             task_description=task_description,
-            task_constraints=task_constraints or None,
-            task_progress_summary=self.task_progress_summary,
-            observation_history=self.observation_history or None,
-            action_history=self.action_history or None,
-            notes_summary=self.notes_summary,
+            task_constraints=task_constraints,
+            observation_history=observation_history,
+            action_history=action_history,
+            notes_summary=notes_summary,
             observation=observation,
         )
         result = self._call_json_prompt(system_message, user_message)
-        self.task_progress_summary = result.get("task_progress")
-        self.task_feedback = result.get("task_feedback")
         return result
 
     def _infer_notes_summary(
@@ -297,23 +304,26 @@ class HPA:
         task_description: str,
         task_constraints: list[str],
         observation: str,
+        action_history: list[str],
+        task_progress_summary: str,
+        notes_summary: str,
     ) -> dict:
         system_message = NotesSummaryPrompt.system_message
         user_message = NotesSummaryPrompt.user_prompt(
             task_description=task_description,
-            task_constraints=task_constraints or None,
-            task_progress_summary=self.task_progress_summary,
-            action_history=self.action_history or None,
-            notes=self.notes_summary,
+            task_constraints=task_constraints,
+            task_progress_summary=task_progress_summary,
+            action_history=action_history,
+            notes=notes_summary,
             observation=observation,
         )
         result = self._call_json_prompt(system_message, user_message)
         new_notes = result.get("new_notes")
         if new_notes:
-            if self.notes_summary:
-                self.notes_summary = f"{self.notes_summary}\n{new_notes}".strip()
+            if self.previous_notes:
+                self.previous_notes = f"{self.previous_notes}\n{new_notes}".strip()
             else:
-                self.notes_summary = str(new_notes)
+                self.previous_notes = str(new_notes)
         return result
 
     def _infer_node_expansion(
@@ -327,8 +337,7 @@ class HPA:
         user_message = NodeExpansionPrompt.user_prompt(
             task_description=task_description,
             task_constraints=task_constraints or None,
-            task_progress_summary=self.task_progress_summary,
-            notes_summary=self.notes_summary,
+            notes_summary=self.previous_notes,
             observation=observation,
             node_id=str(node.id),
             node_description=node.description,
@@ -439,21 +448,23 @@ class HPA:
     def _set_context(self, node: Node):
         pass
 
-    def _global_tree_update(self, task_description: str, task_constraints: list[str], observation: str) -> None: # TODO: Should return the updated global tree: a list of nodes ordered by their ids
+    def _global_tree_update(
+        self, task_description: str, task_constraints: list[str], observation: str
+    ) -> None:  # TODO: Should return the updated global tree: a list of nodes ordered by their ids
         system_message = GlobalTreeUpdatePrompt(self.action_set, self.action_flags).system_message()
         user_message = GlobalTreeUpdatePrompt.user_prompt(
             task_description=task_description,
             task_constraints=task_constraints or None,
             task_progress_summary=self.task_progress_summary,
-            notes_summary=self.notes_summary,
+            notes_summary=self.previous_notes,
             observation=observation,
-            global_tree_info=self.global_tree, # TODO: Implement the global_tree attribute: a list of nodes ordered by their ids
+            global_tree_info=self.global_tree,  # TODO: Implement the global_tree attribute: a list of nodes ordered by their ids
         )
         result = self._call_json_prompt(system_message, user_message)
         pruned_nodes = result.get("prune", [])
         updated_nodes = result.get("update", {})
         # TODO: prune and update the nodes in the global_tree
-        return 
+        return
 
     def _update_observations(self, node: Node, obs: dict):
         observation = obs.get("axtree_txt") or obs.get("dom_txt") or obs.get("pruned_html")

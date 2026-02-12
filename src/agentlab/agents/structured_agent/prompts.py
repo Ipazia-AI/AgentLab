@@ -61,11 +61,11 @@ def _optional_block(label: str, value) -> str:
 @dataclass(frozen=True)
 class TaskConstraintsPrompt:
     system_message: str = """\
-You are a web-browsing assistant designed to extract structured constraint data from user queries. Given a natural language query, identify and return a list of task constraints that apply to the overall task.
-A task constraint is an explicitly stated condition that affects the overall search or task execution.
+You are a web-browsing assistant designed to extract structured constraint data from user provided task. Given a natural language request, identify and return a list of constraints that apply to the overall task.
+A task constraint is an explicitly stated condition that affects the task execution.
 
-Instructions:
-- Extract only the task constraints explicitly stated in the query.
+IMPORTANT RULES:
+- Extract only the task constraints explicitly stated in the user provided task.
 - Do not infer, assume, or add implicit constraints.
 - Return valid JSON only, using the exact key "task_constraints".
 - Each constraint must appear only once.
@@ -80,7 +80,7 @@ Response format (valid JSON):
   ]
 }
 
-Example query: "Find a black laptop bag under 40 and a wireless mouse under 25. Both should be delivered within 2 days. URL: www.amazon.com"
+Example task: "Find a black laptop bag under 40 and a wireless mouse under 25. Both should be delivered within 2 days. URL: www.amazon.com"
 Example output:
 {
   "task_constraints": [
@@ -94,10 +94,10 @@ Example output:
 """
 
     @staticmethod
-    def user_prompt(task_objective: str, current_observation: str | None = None) -> dp.Shrinkable:
+    def user_prompt(goal: str, current_observation: str | None = None) -> dp.Shrinkable:
         return _ShrinkableUserMessage(
             [
-                ("QUERY", task_objective),
+                ("TASK", goal),
                 (
                     "WEB PAGE CONTENT",
                     _TextTrunkater(current_observation, start_trunkate_iteration=2),
@@ -106,9 +106,9 @@ Example output:
         )
 
     @staticmethod
-    def user_message(task_objective: str, current_observation: str | None = None) -> str:
+    def user_message(goal: str, current_observation: str | None = None) -> str:
         return TaskConstraintsPrompt.user_prompt(
-            task_objective=task_objective,
+            goal=goal,
             current_observation=current_observation,
         ).prompt
 
@@ -118,28 +118,26 @@ class ObservationSummaryPrompt:
     system_message: str = """\
 You are a Context Summarization and Critiquing Agent for web-browsing tasks.
 Your job is to maintain an accurate, up-to-date understanding of task progress by analyzing:
-- Task description
-- Task constraints (if any)
-- Task progress summary (if provided)
-- Observation history (if provided)
-- Action history (if provided)
-- Notes summary (if provided)
-- Current observation (web page accessibility tree)
+- TASK DESCRIPTION: a textual description of the task to complete
+- CURRENT OBSERVATION: the current observation of the webpage's accessibility tree
+- TASK CONSTRAINTS: a list of constraints that must be satisfied to complete the task (if any)
+- OBSERVATION HISTORY: list of observations of the webpage's accessibility tree sorted by time (if provided)
+- ACTION HISTORY: list of actions taken by the Action Executor Agent sorted by time (if provided)
+- PREVIOUS NOTES: latest notes taken by the Notes Summarizer Agent (if provided)
 
-Instructions:
-1. Do not infer any details or make assumptions.
-2. Analyze all available inputs, especially the current accessibility tree.
-3. Keep summaries aligned with the main task objective.
-4. Do not omit information that may influence decisions or navigation.
-5. Make detailed, well-structured, and actionable summaries.
-6. Output valid JSON only, using the exact keys below.
+IMPORTANT RULES:
+- Do not infer any details or make assumptions.
+- Analyze all available inputs, especially the current accessibility tree.
+- Keep summaries aligned with the main task objective.
+- Do not omit information that may influence decisions or navigation.
+- Make detailed, well-structured, and actionable summaries.
+- Output valid JSON only, using the exact keys below.
 
 Response format (valid JSON):
 {
   "observation_summary": "Describe the information from the CURRENT OBSERVATION. Emphasize elements and features relevant for fulfilling the task objective. Include all important detail.",
   "observation_highlights": "List of relevant element IDs from the CURRENT OBSERVATION that are useful for the task.",
   "task_progress": "Summarize actions actually taken and assess each explicitly stated task requirement or constraint. Diagnose why the task is not complete, then give key takeaways.",
-  "task_feedback": "Outline what the agent should focus on next to complete the task. (2 sentences)"
 }
 
 Example:
@@ -147,7 +145,6 @@ Example:
   "observation_summary": "The page shows search results for 'iPhone 12 Pro Blue 128GB' on Amazon. The first relevant listing is an Apple iPhone 12 Pro, 128GB in Pacific Blue (Renewed) for $314.39. Multiple other iPhone models are also shown including iPhone 12, 13, and 14 in various colors and storage configurations.",
   "observation_highlights": [6028, 6033, 6042, 7204, 9277, 9280, 7242],
   "task_progress": "The agent navigated to an Amazon search results page and identified a relevant listing matching the model, color, storage, and condition constraints. All explicitly defined constraints appear satisfied on the listing. However, the task is not complete because the agent has not clicked the product, verified details on the product page, or added the item to the cart. The key takeaway is that discovery is done and verification plus checkout steps remain.",
-  "task_feedback": "Click the product listing to verify details on the product page, then add it to the cart. Confirm the exact model and specs before completing the task."
 }
 """
 
@@ -156,7 +153,6 @@ Example:
         task_description: str,
         observation: str,
         task_constraints: str | list[str] | None = None,
-        task_progress_summary: str | None = None,
         observation_history: str | list[str] | None = None,
         action_history: str | list[str] | None = None,
         notes_summary: str | None = None,
@@ -164,15 +160,14 @@ Example:
         return _ShrinkableUserMessage(
             [
                 ("TASK DESCRIPTION", task_description),
+                ("CURRENT OBSERVATION", _TextTrunkater(observation, start_trunkate_iteration=2)),
                 ("TASK CONSTRAINTS", task_constraints),
-                ("TASK PROGRESS SUMMARY", task_progress_summary),
                 (
                     "OBSERVATION HISTORY",
                     _TextTrunkater(observation_history, start_trunkate_iteration=4),
                 ),
                 ("ACTION HISTORY", _TextTrunkater(action_history, start_trunkate_iteration=4)),
-                ("NOTES SUMMARY", _TextTrunkater(notes_summary, start_trunkate_iteration=4)),
-                ("CURRENT OBSERVATION", _TextTrunkater(observation, start_trunkate_iteration=2)),
+                ("PREVIOUS NOTES", _TextTrunkater(notes_summary, start_trunkate_iteration=4)),
             ]
         )
 
@@ -181,7 +176,6 @@ Example:
         task_description: str,
         observation: str,
         task_constraints: str | list[str] | None = None,
-        task_progress_summary: str | None = None,
         observation_history: str | list[str] | None = None,
         action_history: str | list[str] | None = None,
         notes_summary: str | None = None,
@@ -190,7 +184,6 @@ Example:
             task_description=task_description,
             observation=observation,
             task_constraints=task_constraints,
-            task_progress_summary=task_progress_summary,
             observation_history=observation_history,
             action_history=action_history,
             notes_summary=notes_summary,
@@ -203,23 +196,23 @@ class NotesSummaryPrompt:
 You are an advanced web-browsing agent that generates notes from the current observation and forms a response to the task using those notes.
 
 You are given:
-- Task description
-- Task constraints (if any)
-- Task progress summary (if provided)
-- Action history (if provided)
-- Previous notes (if provided)
-- Current observation (web page accessibility tree)
+- TASK DESCRIPTION: a textual description of the task to complete
+- CURRENT OBSERVATION: the current observation of the webpage's accessibility tree
+- TASK CONSTRAINTS: a list of constraints that must be satisfied to complete the task (if any)
+- TASK PROGRESS SUMMARY: summary of the task progress as provided by the Observation Summary Agent (if provided)
+- ACTION HISTORY: list of actions taken by the Action Executor Agent sorted by time (if provided)
+- PREVIOUS NOTES: yours notes taken so far (if provided)
 
-Instructions:
-1. Do not infer any details or make assumptions.
-2. Analyze all available inputs, especially the current web page's accessibility tree.
-3. Do not omit information that may influence decisions or navigation.
-4. Output valid JSON only, using the exact keys below.
+IMPORTANT RULES:
+- Do not infer any details or make assumptions.
+- Analyze all available inputs, especially the current web page's accessibility tree.
+- Do not omit information that may influence decisions or navigation.
+- Output valid JSON only, using the exact keys below.
 
 Response format (valid JSON):
 {
   "new_notes": "Identify all new information grounded in observation that can help complete the task.",
-  "task_response": "Provide the best possible response to the task using only the notes and action history. Do not add new information."
+  "task_response": "Provide the best possible response to the task using only the notes and action history. Do not add new information. Do not repeat information from the previous notes."
 }
 
 Example:
@@ -241,11 +234,14 @@ Example:
         return _ShrinkableUserMessage(
             [
                 ("TASK DESCRIPTION", task_description),
+                ("CURRENT OBSERVATION", _TextTrunkater(observation, start_trunkate_iteration=2)),
                 ("TASK CONSTRAINTS", task_constraints),
-                ("TASK PROGRESS SUMMARY", task_progress_summary),
+                (
+                    "TASK PROGRESS SUMMARY",
+                    _TextTrunkater(task_progress_summary, start_trunkate_iteration=4),
+                ),
                 ("ACTION HISTORY", _TextTrunkater(action_history, start_trunkate_iteration=4)),
                 ("PREVIOUS NOTES", _TextTrunkater(notes, start_trunkate_iteration=4)),
-                ("CURRENT OBSERVATION", _TextTrunkater(observation, start_trunkate_iteration=2)),
             ]
         )
 
@@ -286,9 +282,8 @@ You dynamically construct AND/OR planning trees from observations of the webpage
 You are provided:
 - TASK DESCRIPTION: a textual description of the task to complete
 - TASK CONSTRAINTS: a list of constraints that must be satisfied to complete the task
-- TASK PROGRESS SUMMARY: a summary of the current task progress
-- NOTES SUMMARY: a summary of the notes taken so far
-- OBSERVATION: the current observation of the webpage's accessibility tree
+- PREVIOUS NOTES: notes taken so far by the Notes Summarizer Agent, these may contain useful insights that can help complete the task (if provided)
+- CURRENT OBSERVATION: the current observation of the webpage's accessibility tree
 - NODE INFORMATIONS:
     - node_id: the ID of the node to analyze
     - node_description: the description of the node to analyze
@@ -310,14 +305,17 @@ Your task for the given node:
 2. Choose ONE of the following options:
    A. Mark node as ACTION if the goal can be achieved using a single atomic action from the list above.
    B. Expand the node if the goal cannot be solved by performing a single atomic action.
-      - For AND nodes, provide the ordered list of logical subgoals.
-      - For OR nodes, provide a list of alternative strategies ordered by likelihood of success, including a (0–1) score in each string (e.g., “Strategy here (score: 0.85)”).
-      - Do not add speculative or redundant subgoals.
+      
+      
 
 IMPORTANT RULES:
 - If you think the task can be completed through an action, mark the node as an action.
 - If you need to expand the task in subtasks, focus on expansions that will complete the task faster with high probability.
-    - For AND nodes, ensure temporal order of children is correct and efficient.
+- For AND nodes, provide the ordered list of logical subgoals.
+- For AND nodes, ensure temporal order of children is correct and efficient.
+- For OR nodes, provide a list of alternative strategies, including a (0–1) score in each string (e.g., “Strategy here (score: 0.85)”).
+- For OR nodes, choose the score based on the likelihood of success of the strategy (think deeply about the navigation strategy of the website)
+- Do not add speculative or redundant subgoals.
 - Do not output anything outside the specified JSON format.
 
 Output must be valid JSON using one of the following formats:
@@ -360,7 +358,6 @@ Format 3 (node type OR):
     def user_prompt(
         task_description: str,
         task_constraints: str | list[str] | None,
-        task_progress_summary: str | None,
         notes_summary: str | None,
         observation: str,
         node_id: str,
@@ -371,12 +368,8 @@ Format 3 (node type OR):
             [
                 ("TASK DESCRIPTION", task_description),
                 ("TASK CONSTRAINTS", task_constraints),
-                (
-                    "TASK PROGRESS SUMMARY",
-                    _TextTrunkater(task_progress_summary, start_trunkate_iteration=4),
-                ),
-                ("NOTES SUMMARY", _TextTrunkater(notes_summary, start_trunkate_iteration=4)),
-                ("OBSERVATION", _TextTrunkater(observation, start_trunkate_iteration=2)),
+                ("PREVIOUS NOTES", _TextTrunkater(notes_summary, start_trunkate_iteration=4)),
+                ("CURRENT OBSERVATION", _TextTrunkater(observation, start_trunkate_iteration=2)),
                 ("node_id", node_id),
                 ("node_description", node_description),
                 (
@@ -390,7 +383,6 @@ Format 3 (node type OR):
     def user_message(
         task_description: str,
         task_constraints: str | list[str] | None,
-        task_progress_summary: str | None,
         notes_summary: str | None,
         observation: str,
         node_id: str,
@@ -400,7 +392,6 @@ Format 3 (node type OR):
         return NodeExpansionPrompt.user_prompt(
             task_description=task_description,
             task_constraints=task_constraints,
-            task_progress_summary=task_progress_summary,
             notes_summary=notes_summary,
             observation=observation,
             node_id=node_id,
@@ -442,7 +433,6 @@ You are provided:
 - The root-level task description 
 - Current AND/OR tree description 
 - The accessibility tree structure of the current webpage as the observation 
-- Task progress summary 
 - Notes summary: Summary of notes taken by the agent during the task
 
 Your task is to carefully analyze all the information provided and determine which nodes to prune and which nodes to update.
@@ -496,7 +486,6 @@ Example:
     def user_prompt(
         task_description: str,
         task_constraints: str | list[str] | None,
-        task_progress_summary: str | None,
         notes_summary: str | None,
         observation: str,
         global_tree_info: str,
@@ -505,10 +494,6 @@ Example:
             [
                 ("ROOT-LEVEL TASK DESCRIPTION", task_description),
                 ("TASK CONSTRAINTS", task_constraints),
-                (
-                    "TASK PROGRESS SUMMARY",
-                    _TextTrunkater(task_progress_summary, start_trunkate_iteration=4),
-                ),
                 ("NOTES SUMMARY", _TextTrunkater(notes_summary, start_trunkate_iteration=4)),
                 ("OBSERVATION", _TextTrunkater(observation, start_trunkate_iteration=2)),
                 (
@@ -522,7 +507,6 @@ Example:
     def user_message(
         task_description: str,
         task_constraints: str | list[str] | None,
-        task_progress_summary: str | None,
         notes_summary: str | None,
         observation: str,
         global_tree_info: str,
@@ -530,7 +514,6 @@ Example:
         return GlobalTreeUpdatePrompt.user_prompt(
             task_description=task_description,
             task_constraints=task_constraints,
-            task_progress_summary=task_progress_summary,
             notes_summary=notes_summary,
             observation=observation,
             global_tree_info=global_tree_info,
