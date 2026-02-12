@@ -105,7 +105,7 @@ class HPA:
             node.status = NodeStatus.FAIL
             node.action_error = action_error
 
-        # self._global_tree_update()
+        # self._global_tree_update(task_description=self.root_node.description, task_constraints=self.task_constraints, observation=obs.get("axtree_txt", ""))
         self._update_observations(node, obs)
 
     # Algo 2 from the HPA paper
@@ -443,20 +443,86 @@ class HPA:
         pass
 
     def _get_global_tree(self) -> list[Node]:
+        """
+        Returns the global tree as a list of nodes.
+
+        Args:
+            None
+
+        Returns:
+            List[Node]: List of nodes in the global tree.
+        """
         if not getattr(self, "root_node", None):
             return []
-        global_tree = []
-        def walk_tree(node: Node):
+        def walk_tree(node: Node, nodes_list: list[Node]):
             if node.status == NodeStatus.DELETED:
                 return
-            global_tree.append(node)
+            nodes_list.append(node)
             for child in node.children:
-                walk_tree(child)
-        walk_tree(self.root_node)
-        global_tree.sort(key=lambda n: (n.id,))
+                walk_tree(child, nodes_list)
+            return nodes_list
+        global_tree = walk_tree(self.root_node, [])
         return global_tree
 
-    def _global_tree_update(self, task_description: str, task_constraints: list[str], observation: str) -> None: # TODO: Should return the updated global tree: a list of nodes ordered by their ids
+    def _get_nodes_from_ids(self, node_ids: list[str], global_tree: list[Node]) -> List[Node]:
+        """
+        Returns the nodes from the global tree that have specified ids.
+
+        Args:
+            node_ids: list of node ids to get from the global tree.
+            global_tree: list of nodes in the global tree.
+
+        Returns:
+            List[Node]: List of nodes from the global tree that have specified ids.
+        """
+        return [node for node in global_tree if node.id in node_ids]
+            
+    def _prune_nodes_from_global_tree(self, pruned_node_ids: list[str], global_tree: list[Node]) -> None:
+        """
+        Sets the status of the nodes with specified ids to PRUNED.
+
+        Args:
+            pruned_node_ids: list of node ids to prune from the global tree.
+            global_tree: list of nodes in the global tree.
+
+        Returns:
+            None
+        """
+        nodes_to_prune = self._get_nodes_from_ids(node_ids=pruned_node_ids, global_tree=global_tree)
+        for node in nodes_to_prune:
+            node.status = NodeStatus.PRUNED
+        return
+
+    def _update_nodes_in_global_tree(self, updated_node_ids: dict[str, str], global_tree: list[Node]) -> None:
+        """
+        Updates the description of the nodes with specified ids.
+
+        Args:
+            updated_node_ids: dictionary of node ids to update and their new descriptions.
+            global_tree: list of nodes in the global tree.
+
+        Returns:
+            None
+        """
+        nodes_to_update = self._get_nodes_from_ids(node_ids=list(updated_node_ids.keys()), global_tree=global_tree)
+        for node in nodes_to_update:
+            node.description = updated_node_ids[node.id]
+        return
+    
+    def _global_tree_update(self, task_description: str, task_constraints: list[str], observation: str) -> None:
+        """
+        Updates the global tree based on the task description, task constraints, observation and other information.
+        
+        Args:
+            task_description: string containing the task description.
+            task_constraints: list of strings of the task constraints.
+            observation: axtree of the current webpage.
+
+        Returns:
+            None
+        """
+        global_tree = self._get_global_tree()
+        global_tree_info = "\n\n".join([f"NODE ID: {node.id}\nNODE TYPE: {node.type.name}\nNODE STATUS: {node.status.name}\nNODE DESCRIPTION: {node.description}\nNODE ACTION: {node.action}" for node in global_tree])
         system_message = GlobalTreeUpdatePrompt(self.action_set, self.action_flags).system_message()
         user_message = GlobalTreeUpdatePrompt.user_prompt(
             task_description=task_description,
@@ -464,12 +530,13 @@ class HPA:
             task_progress_summary=self.task_progress_summary,
             notes_summary=self.notes_summary,
             observation=observation,
-            global_tree_info=self.global_tree, # TODO: Implement the global_tree attribute: a list of nodes ordered by their ids
+            global_tree_info=global_tree_info,
         )
-        result = self._call_json_prompt(system_message, user_message)
-        pruned_nodes = result.get("prune", [])
-        updated_nodes = result.get("update", {})
-        # TODO: prune and update the nodes in the global_tree
+        result = self._call_json_prompt(system_message=system_message, user_message=user_message)
+        pruned_node_ids = result.get("prune", [])
+        updated_node_ids = result.get("update", {})
+        self._prune_nodes_from_global_tree(pruned_node_ids=pruned_node_ids, global_tree=global_tree)
+        self._update_nodes_in_global_tree(updated_node_ids=updated_node_ids, global_tree=global_tree)
         return 
 
     def _update_observations(self, node: Node, obs: dict):

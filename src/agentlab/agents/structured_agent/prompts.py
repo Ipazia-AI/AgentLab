@@ -442,12 +442,10 @@ Apply changes in this strict order:
 2. UPDATE node descriptions if intent is unchanged but content needs minor revision.
 
 Important Rules: 
-- You are only allowed to PRUNE or UPDATE nodes that have not been deleted, or pruned, or marked succesful. 
-- Do not add status of the node while updating the description. 
+- You are only allowed to PRUNE or UPDATE nodes which status is not DELETED, PRUNED, or SUCCESS. 
+- For each node, you can only prune the node or update the description, not both.
 - Only use existing node IDs from the current tree; do not create new node IDs or subtrees. 
 - Do NOT PRUNE children that are necessary for satisfying the parent node’s objective. 
-- Do not change node types. 
-- Do not change the ordering of the sub-plans.
 - Updating or pruning is not always necessary. Just fill the fields with empty lists or dictionaries if no changes are needed.
 
 First reason about the update to the tree based on the information given to you (task description, task constraints, task progress summary, notes summary, current AND/OR tree description, observation) and then give your answer in the following format. 
@@ -462,11 +460,11 @@ Formatting Instructions:
 	"node_id of the third node to prune"
   ],
 
-  "update": {
+  "update": {{
 	"node_id of the first node to update": "Describe here the node’s new objective (subgoal/strategy/description of action)",
 	"node_id of the second node to update": "Describe here the node’s new objective (subgoal/strategy/description of action)",
 	"node_id of the third node to update": "Describe here the node’s new objective (subgoal/strategy/description of action)"
-  }
+  }}
 }}
 
 Example:
@@ -476,10 +474,10 @@ Example:
 	"1.3"
   ],
 
-  "update": {
+  "update": {{
 	"0.1.2": "type eggless cake in search bar",
 	"0.2": "Find an eggless cake recipe with over 60 votes and at least 4.5 star rating by examining search results"
-  }
+  }}
 }}
 """
     @staticmethod
