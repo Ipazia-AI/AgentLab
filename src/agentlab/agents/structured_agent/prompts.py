@@ -272,8 +272,8 @@ class NodeExpansionPrompt:
             action_flags=action_flags,
         ).prompt
 
-    def system_message(self) -> str:
-        return f"""\
+    def system_message(self, force_action: bool = False) -> str:
+        base = f"""\
 You are an efficient logical (AND/OR) tree constructing agent specialized in web-browsing tasks. You solve complex problems using AND/OR planning trees.
 You dynamically construct AND/OR planning trees from observations of the webpage’s accessibility tree structure for efficient and robust task execution.
 
@@ -298,6 +298,7 @@ Node status indicators:
 - SUCCESS
 - FAIL
 
+This is the list of browser actions that can be performed on the webpage:
 {self.action_prompt}
 
 Your task for the given node:
@@ -316,7 +317,19 @@ Important Rules:
 - Use go_back after navigation when returning to a previous page is required.
 - If an action requires an element ID, include a valid ID as a string from the accessibility tree in round brackets.
 - Do not output anything outside the specified JSON format.
+"""
 
+        if force_action:
+            base += """
+CRITICAL DEPTH CONSTRAINT:
+This node has reached the MAXIMUM allowed tree depth. You MUST classify it as an ACTION node.
+Do NOT return AND or OR — further decomposition is not permitted at this depth.
+You must provide a single atomic browser action that best achieves the node's goal.
+Only use Format 1 (ACTION) below.
+
+"""
+
+        base += """\
 Output must be valid JSON using one of the following formats:
 
 Format 1 (node type ACTION):
@@ -327,7 +340,10 @@ Format 1 (node type ACTION):
   "expansion": "Exact atomic action from the list of browser actions",
   "reasoning": "Brief justification explaining why the node is classified as ACTION"
 }}
+"""
 
+        if not force_action:
+            base += """
 Format 2 (node type AND):
 {{
   "node_id": "ID of the node here",
@@ -352,6 +368,7 @@ Format 3 (node type OR):
   "reasoning": "Brief justification explaining why the node is classified as OR"
 }}
 """
+        return base
 
     @staticmethod
     def user_prompt(
@@ -412,13 +429,13 @@ class GlobalTreeUpdatePrompt:
 
     def system_message(self) -> str:
         return f"""\
-You are a global logical (AND/OR) tree update agent revising an existing logical planning tree for a web-browsing task based on current available information so that the task is executed more efficiently. 
-Do not change the ordering of the sub-plans.
+You are an agent that operates as the global manager of a logical (AND/OR) tree that represents the execution plan for a web-browsing task.
+Your job is to manage the tree by changing the nodes based on the current available information so that the task is executed more efficiently.
 
 Possible Node Types:
-- AND Node: Represents an ordered list of logical subgoals required to achieve the node’s objective.
-- OR Node: Represents alternative sub-strategies (which can be other AND/OR nodes).
-- ACTION Node: Single executable action strictly matching one element of the list of browser actions described below.
+- AND Node: Represents an ordered list of logical subgoals required to achieve the node’s objective. The children of an AND node are executed in the order they are listed. To be completed, all children must be completed successfully.
+- OR Node: Represents alternative sub-strategies (which can be other AND/OR nodes). The children of an OR node represent different ways to achieve the node's objective. To be completed, at least one child must be completed successfully.
+- ACTION Node: Single executable action strictly matching one element of the list of browser actions described below. The action node is a leaf node that represents a single action to be executed on the webpage.
 
 Node status indicators:
 - VISITED: for visited nodes
@@ -427,32 +444,33 @@ Node status indicators:
 - SUCCESS: for completed nodes 
 - FAIL: for temporarily failed nodes
 
+This is the list of browser actions that can be performed on the webpage:
 {self.action_prompt}
 
 You are provided: 
-- The root-level task description 
-- Current AND/OR tree description 
-- The accessibility tree structure of the current webpage as the observation 
-- Task progress summary 
-- Notes summary: Summary of notes taken by the agent during the task
+- The overall goal of the task
+- The Current tree status. For each node, you are provided with the node id, node type, node description, node status and the node action.
+- The id of the node which action was executed as last on the webpage. 
+- The accessibility tree structure of the current webpage as the observation after the action was executed.
+- The overall task progress summary so far.
+- A summary of notes taken by the agent so far.
 
-Your task is to carefully analyze all the information provided and determine which nodes to prune and which nodes to update.
+----------------------------------
+Your task is to carefully analyze all the information provided and manipulate the tree to determine which nodes to prune and which nodes to update.
+This refinement operation serves to reduce the tree complexity by removing unpromising branches, avoid redundancies in the tasks and improve the overall task execution efficiency.
 Apply changes in this strict order:
-1. PRUNE nodes that are no longer relevant or are duplicates. 
-2. UPDATE node descriptions if intent is unchanged but content needs minor revision.
+1. PRUNE nodes that are no longer relevant or are duplicates. A node is considered duplicate if it has the same objective as another node in the tree. A node is irrelevant if it is no more necessary to achieve the overall task.
+2. UPDATE node descriptions. The node description is intended as the subgoal of that node. Therefore, it should only contain description of the operations to be performed to achieve the subgoal. No information about other nodes in the tree should be included.
 
 Important Rules: 
 - You are only allowed to PRUNE or UPDATE nodes which status is not DELETED, PRUNED, or SUCCESS. 
 - For each node, you can only prune the node or update the description, not both.
 - Only use existing node IDs from the current tree; do not create new node IDs or subtrees. 
 - Do NOT PRUNE children that are necessary for satisfying the parent node’s objective. 
-- Updating or pruning is not always necessary. Just fill the fields with empty lists or dictionaries if no changes are needed.
+- Updating or pruning is not always necessary. Just fill the fields with empty lists or dictionaries if no changes are needed. Be precise in the changes you make.
 
-First reason about the update to the tree based on the information given to you (task description, task constraints, task progress summary, notes summary, current AND/OR tree description, observation) and then give your answer in the following format. 
-Use the AND/OR tree description to ensure that you are not repeating any subgoals that have already been considered. 
-Format your output as JSON.
+Provide your answer in the following JSON format:
 
-Formatting Instructions:
 {{
   "prune": [
     "node_id of the first node to prune",
@@ -461,9 +479,9 @@ Formatting Instructions:
   ],
 
   "update": {{
-	"node_id of the first node to update": "Describe here the node’s new objective (subgoal/strategy/description of action)",
-	"node_id of the second node to update": "Describe here the node’s new objective (subgoal/strategy/description of action)",
-	"node_id of the third node to update": "Describe here the node’s new objective (subgoal/strategy/description of action)"
+	"node_id of the first node to update": "Describe here the node’s new subgoal/strategy",
+	"node_id of the second node to update": "Describe here the node’s new subgoal/strategy",
+	"node_id of the third node to update": "Describe here the node’s new subgoal/strategy"
   }}
 }}
 
@@ -483,6 +501,7 @@ Example:
     @staticmethod
     def user_prompt(
         task_description: str,
+        node_id: str,
         task_constraints: str | list[str] | None,
         task_progress_summary: str | None,
         notes_summary: str | None,
@@ -491,7 +510,8 @@ Example:
     ) -> dp.Shrinkable:
         return _ShrinkableUserMessage(
             [
-                ("ROOT-LEVEL TASK DESCRIPTION", task_description),
+                ("OVERALL GOAL OF THE TASK", task_description),
+                ("CURRENT NODE ID", node_id),
                 ("TASK CONSTRAINTS", task_constraints),
                 ("TASK PROGRESS SUMMARY", _TextTrunkater(task_progress_summary, start_trunkate_iteration=4)),
                 ("NOTES SUMMARY", _TextTrunkater(notes_summary, start_trunkate_iteration=4)),

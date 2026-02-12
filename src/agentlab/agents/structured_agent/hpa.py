@@ -32,6 +32,7 @@ class HPA:
         action_set: AbstractActionSet,
         budget: int = 1000,
         max_revision_count: int = 3,
+        max_depth: int = 3,
         max_prompt_tokens: int | None = None,
         max_trunc_itr: int = 20,
     ):
@@ -40,6 +41,7 @@ class HPA:
         self.action_set = action_set
         self.budget = budget  # remove
         self.max_revision_count = max_revision_count
+        self.max_depth = max_depth
         self.max_prompt_tokens = max_prompt_tokens
         self.max_trunc_itr = max_trunc_itr
         self.root_node: Node = Node(type=NodeType.UNKNOWN, description="")
@@ -105,7 +107,7 @@ class HPA:
             node.status = NodeStatus.FAIL
             node.action_error = action_error
 
-        # self._global_tree_update(task_description=self.root_node.description, task_constraints=self.task_constraints, observation=obs.get("axtree_txt", ""))
+        self._global_tree_update(task_description=self.root_node.description, task_constraints=self.task_constraints, observation=obs.get("axtree_txt", ""), node=node)
         self._update_observations(node, obs)
 
     # Algo 2 from the HPA paper
@@ -239,12 +241,16 @@ class HPA:
             task_constraints=task_constraints,
             observation=observation,
         )
+        # Force ACTION when the node is at or beyond the maximum allowed depth.
+        force_action = node.depth >= self.max_depth
+
         # TODO: Check if we need to add obs and notes to the inference
         expansion = self._infer_node_expansion(
             task_description=task_description,
             task_constraints=task_constraints,
             observation=observation,
             node=node,
+            force_action=force_action,
         )
 
         node.metadata.update(
@@ -258,7 +264,7 @@ class HPA:
             }
         )
 
-        node.type = self._apply_expansion(node, expansion)
+        node.type = self._apply_expansion(node, expansion, force_action=force_action)
         return node
 
     def _infer_task_constraints(self, task_description: str, observation: str | None = None) -> list[str]:
@@ -325,8 +331,11 @@ class HPA:
         task_constraints: list[str],
         observation: str,
         node: Node,
+        force_action: bool = False,
     ) -> dict:
-        system_message = NodeExpansionPrompt(self.action_set, self.action_flags).system_message()
+        system_message = NodeExpansionPrompt(self.action_set, self.action_flags).system_message(
+            force_action=force_action,
+        )
         user_message = NodeExpansionPrompt.user_prompt(
             task_description=task_description,
             task_constraints=task_constraints or None,
@@ -339,8 +348,25 @@ class HPA:
         )
         return self._call_json_prompt(system_message, user_message)
 
-    def _apply_expansion(self, node: Node, expansion: dict) -> NodeType:
+    def _apply_expansion(self, node: Node, expansion: dict, force_action: bool = False) -> NodeType:
         node_type = str(expansion.get("node_type", "")).upper().strip()
+
+        # Safety net: if the node is at max depth, override any AND/OR to ACTION.
+        if force_action and node_type in {"AND", "OR"}:
+            logging.warning(
+                "Node %s at depth %d reached max_depth=%d but LLM returned %s. "
+                "Forcing ACTION from the first child description.",
+                node.id, node.depth, self.max_depth, node_type,
+            )
+            children = expansion.get("expansion", [])
+            # Best-effort: use the first child description as the action text.
+            fallback = children[0] if isinstance(children, list) and children else "noop"
+            raise ParseError(
+                f"Maximum tree depth ({self.max_depth}) reached. "
+                f"You MUST return an ACTION node with a single atomic browser action, "
+                f"not a {node_type} node. The goal to achieve in a single action: {fallback}"
+            )
+
         if node_type == "ACTION":
             action = expansion.get("expansion")
             if not isinstance(action, str) or not action.strip():
@@ -509,7 +535,7 @@ class HPA:
             node.description = updated_node_ids[node.id]
         return
     
-    def _global_tree_update(self, task_description: str, task_constraints: list[str], observation: str) -> None:
+    def _global_tree_update(self, task_description: str, task_constraints: list[str], observation: str, node: Node) -> None:
         """
         Updates the global tree based on the task description, task constraints, observation and other information.
         
@@ -526,6 +552,7 @@ class HPA:
         system_message = GlobalTreeUpdatePrompt(self.action_set, self.action_flags).system_message()
         user_message = GlobalTreeUpdatePrompt.user_prompt(
             task_description=task_description,
+            node_id=node.id,
             task_constraints=task_constraints or None,
             task_progress_summary=self.task_progress_summary,
             notes_summary=self.notes_summary,
