@@ -456,18 +456,14 @@ You are provided:
 - A summary of notes taken by the agent so far.
 
 ----------------------------------
-Your task is to carefully analyze all the information provided and manipulate the tree to determine which nodes to prune and which nodes to update.
+Your task is to carefully analyze all the information provided and manipulate the tree to determine which nodes to prune.
 This refinement operation serves to reduce the tree complexity by removing unpromising branches, avoid redundancies in the tasks and improve the overall task execution efficiency.
-Apply changes in this strict order:
-1. PRUNE nodes that are no longer relevant or are duplicates. A node is considered duplicate if it has the same objective as another node in the tree. A node is irrelevant if it is no more necessary to achieve the overall task.
-2. UPDATE node descriptions. The node description is intended as the subgoal of that node. Therefore, it should only contain description of the operations to be performed to achieve the subgoal. No information about other nodes in the tree should be included.
+PRUNE nodes that are no longer relevant or are duplicates. A node is considered duplicate if it has the same objective as another node in the tree. A node is irrelevant if it is no more necessary to achieve the overall task.
 
 Important Rules: 
-- You are only allowed to PRUNE or UPDATE nodes which status is not DELETED, PRUNED, or SUCCESS. 
-- For each node, you can only prune the node or update the description, not both.
-- Only use existing node IDs from the current tree; do not create new node IDs or subtrees. 
-- Do NOT PRUNE children that are necessary for satisfying the parent node’s objective. 
-- Updating or pruning is not always necessary. Just fill the fields with empty lists or dictionaries if no changes are needed. Be precise in the changes you make.
+- You are only allowed to PRUNE nodes which status is not DELETED, PRUNED, or SUCCESS. 
+- Only use existing node IDs from the current tree; do not create new node IDs or subtrees.
+- Pruning is not always necessary. Just fill the fields with empty lists or dictionaries if no changes are needed. Be precise in the changes you make, delete only nodes that do not lead to any further progress in the task.
 
 Provide your answer in the following JSON format:
 
@@ -476,13 +472,7 @@ Provide your answer in the following JSON format:
     "node_id of the first node to prune",
 	"node_id of the second node to prune",
 	"node_id of the third node to prune"
-  ],
-
-  "update": {{
-	"node_id of the first node to update": "Describe here the node’s new subgoal/strategy",
-	"node_id of the second node to update": "Describe here the node’s new subgoal/strategy",
-	"node_id of the third node to update": "Describe here the node’s new subgoal/strategy"
-  }}
+  ]
 }}
 
 Example:
@@ -490,12 +480,7 @@ Example:
   "prune": [
 	"1.2",
 	"1.3"
-  ],
-
-  "update": {{
-	"0.1.2": "type eggless cake in search bar",
-	"0.2": "Find an eggless cake recipe with over 60 votes and at least 4.5 star rating by examining search results"
-  }}
+  ]
 }}
 """
     @staticmethod

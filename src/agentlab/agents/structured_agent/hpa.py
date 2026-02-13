@@ -73,7 +73,7 @@ class HPA:
 
         while self.stack:
             node, state = self.stack.pop()
-
+            
             if node.status == NodeStatus.PRUNED:
                 self._propagate_failure(node)
                 continue
@@ -516,7 +516,8 @@ class HPA:
         """
         nodes_to_prune = self._get_nodes_from_ids(node_ids=pruned_node_ids, global_tree=global_tree)
         for node in nodes_to_prune:
-            node.status = NodeStatus.PRUNED
+            #node.status = NodeStatus.PRUNED
+            node.status = NodeStatus.DELETED
         return
 
     def _update_nodes_in_global_tree(self, updated_node_ids: dict[str, str], global_tree: list[Node]) -> None:
@@ -636,13 +637,15 @@ class HPA:
         return {NodeStatus.SUCCESS, NodeStatus.DELETED, NodeStatus.PRUNED}
 
     def _has_successful_children_and(self, node: Node) -> bool:
-        return all(c.status == NodeStatus.SUCCESS for c in node.children)
+        #return all(c.status == NodeStatus.SUCCESS for c in node.children)
+        return all(c.status == NodeStatus.SUCCESS or c.status == NodeStatus.DELETED for c in node.children)
 
     def _has_successful_children_or(self, node: Node) -> bool:
         return any(c.status == NodeStatus.SUCCESS for c in node.children)
 
     def _has_valid_children_and(self, node: Node) -> bool:
-        return all(c.status not in {NodeStatus.PRUNED, NodeStatus.DELETED} for c in node.children)
+        #return all(c.status not in {NodeStatus.PRUNED, NodeStatus.DELETED} for c in node.children)
+        return all(c.status not in {NodeStatus.PRUNED} for c in node.children)
 
     def _has_valid_children_or(self, node: Node) -> bool:
         return any(c.status not in {NodeStatus.PRUNED, NodeStatus.DELETED} for c in node.children)
