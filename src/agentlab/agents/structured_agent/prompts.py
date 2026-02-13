@@ -311,6 +311,8 @@ Your task for the given node:
 IMPORTANT RULES:
 - If you think the task can be completed through an action, mark the node as an action.
 - If you need to expand the task in subtasks, focus on expansions that will complete the task faster with high probability.
+- Before expanding the node, make sure to analyze the task progress summary and the previous notes to understand the current task progress and the previous notes.
+- Before expanding the node, pay attention to the siblings and the parent node's description in order to avoid repeating the same subgoals or strategies.
 - For AND nodes, provide the ordered list of logical subgoals.
 - For AND nodes, ensure temporal order of children is correct and efficient.
 - For OR nodes, provide a list of alternative strategies, including a (0–1) score in each string (e.g., “Strategy here (score: 0.85)”).
@@ -360,8 +362,7 @@ Format 3 (node type OR):
         task_constraints: str | list[str] | None,
         notes_summary: str | None,
         observation: str,
-        node_id: str,
-        node_description: str,
+        node_info: str,
         local_tree_info: str,
     ) -> dp.Shrinkable:
         return _ShrinkableUserMessage(
@@ -370,12 +371,8 @@ Format 3 (node type OR):
                 ("TASK CONSTRAINTS", task_constraints),
                 ("PREVIOUS NOTES", _TextTrunkater(notes_summary, start_trunkate_iteration=4)),
                 ("CURRENT OBSERVATION", _TextTrunkater(observation, start_trunkate_iteration=2)),
-                ("node_id", node_id),
-                ("node_description", node_description),
-                (
-                    "local_tree_info",
-                    _TextTrunkater(local_tree_info, start_trunkate_iteration=4),
-                ),
+                ("NODE INFO", node_info),
+                ("TREE INFO", local_tree_info),
             ]
         )
 
