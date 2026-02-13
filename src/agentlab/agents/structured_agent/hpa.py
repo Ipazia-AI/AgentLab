@@ -339,8 +339,7 @@ class HPA:
             task_constraints=task_constraints or None,
             notes_summary=self.previous_notes,
             observation=observation,
-            node_id=str(node.id),
-            node_description=node.description,
+            node_info=str(node),
             local_tree_info=self._describe_local_tree(node),
         )
         return self._call_json_prompt(system_message, user_message)
@@ -422,24 +421,17 @@ class HPA:
         parts: list[str] = []
         if node.parent is None:
             return "root_node"
-        parts.append(f"parent_node_id: {node.parent.id}")
-        parts.append(f"parent_node_description: {node.parent.description}")
+        parts.append(f"PARENT: {str(node.parent)}")
         if node.parent.children:
-            siblings = [
-                f"{child.id}: {child.description} (status={child.status.name})"
-                for child in node.parent.children
-                if child is not node
-            ]
+            siblings = [str(child) for child in node.parent.children if child is not node]
             if siblings:
-                parts.append("siblings:\n" + "\n".join(siblings))
+                parts.append("SIBLINGS:\n" + "\n".join(siblings))
         if node.parent.parent and node.parent.parent.children:
             parent_siblings = [
-                f"{child.id}: {child.description} (status={child.status.name})"
-                for child in node.parent.parent.children
-                if child is not node.parent
+                str(child) for child in node.parent.parent.children if child is not node.parent
             ]
             if parent_siblings:
-                parts.append("parent_siblings:\n" + "\n".join(parent_siblings))
+                parts.append("PARENT SIBLINGS:\n" + "\n".join(parent_siblings))
         return "\n".join(parts)
 
     def _rollback_context(self, node: Node):
