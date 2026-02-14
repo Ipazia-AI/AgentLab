@@ -1,13 +1,29 @@
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import Any
 
 from browsergym.experiments import AgentInfo
 
-from agentlab.agents.dynamic_prompting import make_obs_preprocessor
+from agentlab.agents import dynamic_prompting as dp
 from agentlab.agents.generic_agent.generic_agent import GenericAgent, GenericAgentArgs
-from agentlab.agents.generic_agent.generic_agent_prompt import GenericPromptFlags
+from agentlab.agents.structured_agent.hpa_prompt import (
+    HPAPromptFlags,
+    InsightPrompt,
+    PlanningPrompt,
+    SystemInsightPrompt,
+    SystemPlanningPrompt,
+)
+from agentlab.agents.structured_agent.structured_agent_prompt import (
+    GenericPromptFlags,
+    MainPrompt,
+)
 from agentlab.llm.base_api import BaseModelArgs
-from agentlab.llm.llm_utils import AIMessage, Discussion, SystemMessage
+from agentlab.llm.llm_utils import (
+    BaseMessage,
+    Discussion,
+    ParseError,
+    SystemMessage,
+    retry,
+)
 from agentlab.llm.tracking import cost_tracker_decorator
 
 from .hpa import HPA
@@ -15,10 +31,9 @@ from .hpa import HPA
 
 @dataclass
 class HPAAgentArgs(GenericAgentArgs):
-    chat_model_args: BaseModelArgs | None = None
     budget: int = 1000
     max_revision_count: int = 3
-    multiaction: bool = False
+    flags: HPAPromptFlags = None
 
     def __post_init__(self):
         if self.chat_model_args is not None:
@@ -31,132 +46,155 @@ class HPAAgentArgs(GenericAgentArgs):
             chat_model_args=self.chat_model_args,
             flags=self.flags,
             budget=self.budget,
+            max_retry=self.max_retry,
             max_revision_count=self.max_revision_count,
-            multiaction=self.multiaction,
         )
-
-    def prepare(self):
-        if self.chat_model_args is not None:
-            return self.chat_model_args.prepare_server()
-        return None
-
-    def close(self):
-        if self.chat_model_args is not None:
-            return self.chat_model_args.close_server()
-        return None
 
 
 class HPAAgent(GenericAgent):
     def __init__(
         self,
         chat_model_args: BaseModelArgs | None,
-        flags: GenericPromptFlags,
+        flags: HPAPromptFlags,
         budget: int,
+        max_retry: int,
         max_revision_count: int,
-        multiaction: bool,
     ):
-        self.chat_llm = chat_model_args.make_model() if chat_model_args is not None else None
-        self.flags = flags
-        self.action_set = self.flags.action.action_set.make_action_set()
-        self._obs_preprocessor = make_obs_preprocessor(self.flags.obs)
-
-        self.hpa = HPA(
-            chat_llm=self.chat_llm,
-            action_flags=self.flags.action,
-            action_set=self.action_set,
-            budget=budget,
-            max_revision_count=max_revision_count,
-            max_prompt_tokens=self.flags.max_prompt_tokens,
-            max_trunc_itr=self.flags.max_trunc_itr,
-        )
-        self._local_reset()
+        self.budget = budget
+        self.max_revision_count = max_revision_count
+        super().__init__(chat_model_args, flags, max_retry)
+        self.constraints: str | None = None
+        self.progress: str | None = None
+        self.suggestion: str | None = None
 
     def reset(self, seed=None):
         super().reset(seed)
-        self._local_reset()
 
-    def _local_reset(self):
-        self.hpa.reset()
         self.pending_action_node = None
+        self.constraints = None
+        self.progress = None
+        self.suggestion = None
+        self.hpa = HPA(
+            chat_llm=self.chat_llm,
+            action_set=self.action_set,
+            flags=self.flags,
+            budget=self.budget,
+            max_revision_count=self.max_revision_count,
+        )
 
     @cost_tracker_decorator
-    def get_action(self, obs: Any) -> tuple[str | None, dict]:
+    def get_action(self, obs: Any):
 
-        obs = self.obs_preprocessor(obs)
-        goal = self._extract_goal(obs)
+        self.obs_history.append(obs)
+
+        if len(self.obs_history) == 1:
+            self.hpa.set_goal(self.obs_history[0])
 
         if self.pending_action_node is not None and isinstance(obs, dict):
             # To be adjusted to the right observation key depending on how we manage the success result
-            self.hpa.finalize_action(self.pending_action_node, obs)
+            self.hpa.complete_pending(self.obs_history)
             self.pending_action_node = None
 
-        action_node = self.hpa.run_until_action(
-            goal=goal,
-            obs=obs,
-        )
+        self._infer_insight()
+        self.pending_action_node = self.hpa.get_action_node(self._infer_plan)
+        chat_messages, stats = self._infer_action()
 
-        action = None
-        if action_node is not None:
-            action = action_node.action
-            self.pending_action_node = action_node
-
-        # Build chat messages for browsergym chat interface
-        # Include goal and action history for user visibility
-        chat_messages = Discussion()
-
-        # Add user message with current observation context (if available)
-        if obs.get("chat_messages"):
-            # Browsergym chat_messages use format: {'role': str, 'message': str, 'timestamp': float}
-            # Convert to standard format
-            for msg in obs["chat_messages"]:
-                if isinstance(msg, dict):
-                    role = msg.get("role", "user")
-                    # Handle browsergym format (uses 'message') vs standard format (uses 'content')
-                    content = msg.get("content") or msg.get("message", "")
-                    if content:
-                        chat_messages.add_message({"role": role, "content": content})
-        else:
-            # Otherwise, create a user message with goal
-            chat_messages.add_message({"role": "user", "content": f"Task: {goal}"})
-
-        # Add assistant message with the selected action and reasoning
-        assistant_content = f"Action: {action}"
-        # if len(self.actions) > 1:
-        #     assistant_content += (
-        #         f"\n\nPrevious actions: {', '.join(str(a) for a in self.actions[:-1])}"
-        #     )
-        chat_messages.add_message(AIMessage(assistant_content))
-
-        # Return format expected by BrowserGym/AgentLab
         agent_info = AgentInfo(
+            think=self.thoughts[-1],
             chat_messages=chat_messages,
-            stats=self.chat_llm.get_stats(),
-            extra_info={
-                "hpa": {
-                    "pending_node_id": (
-                        str(self.pending_action_node.id) if self.pending_action_node else None
-                    ),
-                    "pending_node_type": (
-                        self.pending_action_node.type.name if self.pending_action_node else None
-                    ),
-                    "stack_depth": len(self.hpa.stack),
-                },
-            },
+            stats=stats,
+            extra_info={"chat_model_args": asdict(self.chat_model_args)},
         )
 
-        return action, agent_info
+        return self.actions[-1], agent_info
 
-    def _extract_goal(self, obs: dict) -> str:
-        """Extract goal string from observation."""
-        if "goal" in obs and obs["goal"]:
-            return obs["goal"]
+    def _infer_insight(self):
+        ans_dict, chat_messages, stats = self._infer(
+            InsightPrompt(
+                obs_history=self.obs_history,
+                actions=self.actions,
+                memories=self.memories,
+                thoughts=self.thoughts,
+                flags=self.flags,
+            ),
+            SystemMessage(SystemInsightPrompt().prompt),
+        )
 
-        if "goal_object" in obs:
-            g_obj = obs["goal_object"]
-            if isinstance(g_obj, tuple):
-                g_obj = g_obj[0]
-            if isinstance(g_obj, dict):
-                return g_obj.get("text", "Complete the task.")
-            return str(g_obj)
+        self.constraints = ans_dict.get("constraints", None)
+        self.progress = ans_dict.get("progress", None)
+        self.suggestion = ans_dict.get("suggestion", None)
 
-        return "Complete the task."
+    def _infer_plan(self, node_info: str, local_tree_info: str, apply_expansion):
+        ans_dict, chat_messages, stats = self._infer(
+            PlanningPrompt(
+                obs_history=self.obs_history,
+                actions=self.actions,
+                memories=self.memories,
+                thoughts=self.thoughts,
+                action_set=self.action_set,
+                flags=self.flags,
+            ),
+            SystemMessage(SystemPlanningPrompt().prompt),
+        )
+
+        self.pending_action_node = apply_expansion(ans_dict)
+
+    def _infer_action(self) -> tuple[Discussion, dict]:
+
+        ans_dict, chat_messages, stats = self._infer(
+            MainPrompt(
+                action_set=self.action_set,
+                obs_history=self.obs_history,
+                actions=self.actions,
+                memories=self.memories,
+                thoughts=self.thoughts,
+                flags=self.flags,
+            ),
+            SystemMessage(dp.SystemPrompt().prompt),
+        )
+
+        self.plan = ans_dict.get("plan", self.plan)
+        self.plan_step = ans_dict.get("step", self.plan_step)
+        self.actions.append(ans_dict.get("action", None))
+        self.memories.append(ans_dict.get("memory", None))
+        self.thoughts.append(ans_dict.get("think", None))
+
+        return chat_messages, stats
+
+    def _infer(
+        self, main_prompt: dp.Shrinkable, system_prompt: BaseMessage
+    ) -> tuple[dict, Discussion, dict]:
+        max_prompt_tokens, max_trunc_itr = self._get_maxes()
+
+        system_prompt = SystemMessage(dp.SystemPrompt().prompt)
+
+        human_prompt = dp.fit_tokens(
+            shrinkable=main_prompt,
+            max_prompt_tokens=max_prompt_tokens,
+            model_name=self.chat_model_args.model_name,
+            max_iterations=max_trunc_itr,
+            additional_prompts=system_prompt,
+        )
+        try:
+            chat_messages = Discussion([system_prompt, human_prompt])
+            ans_dict = retry(
+                self.chat_llm,
+                chat_messages,
+                n_retry=self.max_retry,
+                parser=main_prompt._parse_answer,
+            )
+            ans_dict["busted_retry"] = 0
+            # inferring the number of retries, TODO: make this less hacky
+            ans_dict["n_retry"] = (len(chat_messages) - 3) / 2
+        except ParseError as e:
+            ans_dict = dict(
+                action=None,
+                n_retry=self.max_retry + 1,
+                busted_retry=1,
+            )
+
+        stats = self.chat_llm.get_stats()
+        stats["n_retry"] = ans_dict["n_retry"]
+        stats["busted_retry"] = ans_dict["busted_retry"]
+
+        return ans_dict, chat_messages, stats

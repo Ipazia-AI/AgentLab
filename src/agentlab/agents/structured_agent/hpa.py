@@ -1,69 +1,39 @@
-import json
 import logging
 from typing import List, Tuple
 
 from bgym import AbstractActionSet
 
-from agentlab.agents import dynamic_prompting as dp
-from agentlab.agents.dynamic_prompting import ActionFlags
-from agentlab.llm.llm_utils import (
-    Discussion,
-    HumanMessage,
-    ParseError,
-    SystemMessage,
-    retry,
-)
+from agentlab.agents.structured_agent.hpa_prompt import HPAPromptFlags
+from agentlab.llm.llm_utils import ParseError
 
 from .andor_tree import Node, NodeState, NodeStatus, NodeType
-from .prompts import (
-    GlobalTreeUpdatePrompt,
-    NodeExpansionPrompt,
-    NotesSummaryPrompt,
-    ObservationSummaryPrompt,
-    TaskConstraintsPrompt,
-)
+from .prompts import GlobalTreeUpdatePrompt
 
 
 class HPA:
     def __init__(
         self,
         chat_llm,
-        action_flags: ActionFlags,
         action_set: AbstractActionSet,
+        flags: HPAPromptFlags,
         budget: int = 1000,
         max_revision_count: int = 3,
-        max_prompt_tokens: int | None = None,
-        max_trunc_itr: int = 20,
     ):
         self.chat_llm = chat_llm
-        self.action_flags = action_flags
         self.action_set = action_set
         self.budget = budget  # remove
         self.max_revision_count = max_revision_count
-        self.max_prompt_tokens = max_prompt_tokens
-        self.max_trunc_itr = max_trunc_itr
         self.stack: List[Tuple[Node, NodeState]] = []
-        self._counter = 0
-        self.action_history: list[str] = []
         self.task_constraints: list[str] = []
         self.task_progress_summary: str | None = None
-        self.observation_history: list[str] = []
         self.previous_notes: str | None = None
+        self.pending_node: Node | None = None
 
-    def reset(self):
-        self._counter = 0
-        self.stack = []
-        self.action_history = []
-        self.task_constraints = []
-        self.task_progress_summary = None
-        self.previous_notes = None
-        self.observation_history = []
+    def set_goal(self, obs_first: dict):
+        self.goal = obs_first["goal"]
+        self.stack = [(Node(type=NodeType.UNKNOWN, description=self.goal), NodeState.ENTERING)]
 
-    def run_until_action(self, goal: str | None, obs: dict) -> Node | None:
-
-        if self._counter == 0:
-            self.stack = [(Node(type=NodeType.UNKNOWN, description=goal), NodeState.ENTERING)]
-
+    def get_action_node(self, expansion_function) -> Node | None:
         while self.stack:
             node, state = self.stack.pop()
 
@@ -75,9 +45,9 @@ class HPA:
                 continue
 
             if state == NodeState.ENTERING:
-                processed_node = self._process_node_entering(node, obs)
-                if processed_node.type == NodeType.ACTION:
-                    return processed_node
+                self.pending_node = self._process_node_entering(node, expansion_function)
+                if self.pending_node.type == NodeType.ACTION:
+                    return self.pending_node
 
             elif state == NodeState.EXITING:
                 self._process_node_exiting(node)
@@ -91,20 +61,19 @@ class HPA:
 
         return None
 
-    def finalize_action(self, node: Node, obs: dict):
+    def complete_pending(self, obs: dict):
         action_error = obs.get("last_action_error")
         success = True if action_error == "" else False
         if success:
-            node.status = NodeStatus.SUCCESS
+            self.pending_node.status = NodeStatus.SUCCESS
         else:
-            node.status = NodeStatus.FAIL
-            node.action_error = action_error
+            self.pending_node.status = NodeStatus.FAIL
+            self.pending_node.action_error = action_error
 
         # self._global_tree_update()
-        self._update_observations(node, obs)
 
     # Algo 2 from the HPA paper
-    def _process_node_entering(self, node: Node, obs: dict) -> Node:
+    def _process_node_entering(self, node: Node, expansion_function) -> Node:
         if node.parent and node.parent.type == NodeType.OR:
             # TODO: The role of this function is not clear, let's check it later what it is supposed to do.
             self._rollback_context(node.parent)
@@ -114,7 +83,7 @@ class HPA:
         node.execution_count += 1
 
         if node.type == NodeType.UNKNOWN:
-            self._expand_node(node, obs)
+            self._expand_node(node, expansion_function)
             self.stack.append((node, NodeState.EXITING))
 
         if node.type == NodeType.ACTION:
@@ -210,139 +179,16 @@ class HPA:
                     node.status = NodeStatus.PRUNED
                     self._propagate_failure(node)
 
-    def _expand_node(self, node: Node, obs: dict) -> Node:
-        if self.chat_llm is None:
-            node.description = "report_infeasible"
-            node.metadata["node_description"] = "LLM not available"
-            node.type = NodeType.ACTION
-            return node
+    def _expand_node(self, node: Node, expansion_function) -> Node:
 
-        task_description = node.description or "Complete the task."
-        observation = obs.get("axtree_txt") or obs.get("dom_txt") or obs.get("pruned_html") or ""
+        node_info = (str(node),)
+        local_tree_info = (self._describe_local_tree(node),)
 
-        if not self.task_constraints:
-            task_constraints = self._infer_task_constraints(
-                goal=task_description,
-                current_observation=observation,
-            )
-        else:
-            task_constraints = self.task_constraints
-        obs_summary = self._infer_observation_summary(
-            task_description=task_description,
-            task_constraints=task_constraints,
-            observation=observation,
-            observation_history=self.observation_history or None,
-            action_history=self.action_history or None,
-            notes_summary=self.previous_notes or None,
-        )
-        notes_summary = self._infer_notes_summary(
-            task_description=task_description,
-            task_constraints=task_constraints,
-            observation=observation,
-            action_history=self.action_history or None,
-            task_progress_summary=self.task_progress_summary or None,
-            notes_summary=self.previous_notes or None,
-        )
-        # TODO: Check if we need to add obs and notes to the inference
-        expansion = self._infer_node_expansion(
-            task_description=task_description,
-            task_constraints=task_constraints,
-            observation=observation,
-            node=node,
+        expanded_node = expansion_function(
+            node_info, local_tree_info, lambda x: self._apply_expansion(node, x)
         )
 
-        node.metadata.update(
-            {
-                "task_constraints": task_constraints,
-                "observation_summary": obs_summary.get("observation_summary"),
-                "observation_highlights": obs_summary.get("observation_highlights"),
-                "notes_summary": notes_summary.get("new_notes"),
-            }
-        )
-
-        node.type = self._apply_expansion(node, expansion)
-        return node
-
-    def _infer_task_constraints(
-        self, goal: str, current_observation: str | None = None
-    ) -> list[str]:
-        system_message = TaskConstraintsPrompt.system_message
-        user_message = TaskConstraintsPrompt.user_prompt(
-            goal=goal,
-            current_observation=current_observation,
-        )
-        result = self._call_json_prompt(system_message, user_message)
-        constraints = result.get("task_constraints", [])
-        if not isinstance(constraints, list):
-            raise ParseError("Expected 'task_constraints' to be a list.")
-        self.task_constraints = [str(c) for c in constraints if c]
-        return self.task_constraints
-
-    def _infer_observation_summary(
-        self,
-        task_description: str,
-        task_constraints: list[str],
-        observation: str,
-        observation_history: list[str],
-        action_history: list[str],
-        notes_summary: str,
-    ) -> dict:
-        system_message = ObservationSummaryPrompt.system_message
-        user_message = ObservationSummaryPrompt.user_prompt(
-            task_description=task_description,
-            task_constraints=task_constraints,
-            observation_history=observation_history,
-            action_history=action_history,
-            notes_summary=notes_summary,
-            observation=observation,
-        )
-        result = self._call_json_prompt(system_message, user_message)
-        return result
-
-    def _infer_notes_summary(
-        self,
-        task_description: str,
-        task_constraints: list[str],
-        observation: str,
-        action_history: list[str],
-        task_progress_summary: str,
-        notes_summary: str,
-    ) -> dict:
-        system_message = NotesSummaryPrompt.system_message
-        user_message = NotesSummaryPrompt.user_prompt(
-            task_description=task_description,
-            task_constraints=task_constraints,
-            task_progress_summary=task_progress_summary,
-            action_history=action_history,
-            notes=notes_summary,
-            observation=observation,
-        )
-        result = self._call_json_prompt(system_message, user_message)
-        new_notes = result.get("new_notes")
-        if new_notes:
-            if self.previous_notes:
-                self.previous_notes = f"{self.previous_notes}\n{new_notes}".strip()
-            else:
-                self.previous_notes = str(new_notes)
-        return result
-
-    def _infer_node_expansion(
-        self,
-        task_description: str,
-        task_constraints: list[str],
-        observation: str,
-        node: Node,
-    ) -> dict:
-        system_message = NodeExpansionPrompt(self.action_set, self.action_flags).system_message()
-        user_message = NodeExpansionPrompt.user_prompt(
-            task_description=task_description,
-            task_constraints=task_constraints or None,
-            notes_summary=self.previous_notes,
-            observation=observation,
-            node_info=str(node),
-            local_tree_info=self._describe_local_tree(node),
-        )
-        return self._call_json_prompt(system_message, user_message)
+        return expanded_node
 
     def _apply_expansion(self, node: Node, expansion: dict) -> NodeType:
         node_type = str(expansion.get("node_type", "")).upper().strip()
@@ -385,33 +231,6 @@ class HPA:
             return score, cleaned
         except (ValueError, IndexError):
             return None, text
-
-    def _call_json_prompt(self, system_message: str, user_message: str | dp.Shrinkable) -> dict:
-        if isinstance(user_message, dp.Shrinkable):
-            if self.max_prompt_tokens is not None:
-                user_message = dp.fit_tokens(
-                    shrinkable=user_message,
-                    max_prompt_tokens=self.max_prompt_tokens,
-                    model_name=self.chat_llm.model_name,
-                    max_iterations=self.max_trunc_itr,
-                    additional_prompts=system_message,
-                )
-            else:
-                user_message = user_message.prompt
-        messages = Discussion([SystemMessage(system_message), HumanMessage(user_message)])
-
-        def parser(text_answer: str) -> dict:
-            candidate = text_answer.strip()
-            start = candidate.find("{")
-            end = candidate.rfind("}")
-            if start != -1 and end != -1 and end > start:
-                candidate = candidate[start : end + 1]
-            try:
-                return json.loads(candidate)
-            except json.JSONDecodeError as exc:
-                raise ParseError(f"Return valid JSON only. Error: {exc}") from exc
-
-        return retry(self.chat_llm, messages, n_retry=2, parser=parser)
 
     def _select_promising_child(self, node: Node) -> Node:
         valid_children = self._get_valid_children(node)
@@ -457,18 +276,6 @@ class HPA:
         updated_nodes = result.get("update", {})
         # TODO: prune and update the nodes in the global_tree
         return
-
-    def _update_observations(self, node: Node, obs: dict):
-        observation = obs.get("axtree_txt") or obs.get("dom_txt") or obs.get("pruned_html")
-        if observation:
-            self.observation_history.append(observation)
-        if node.type == NodeType.ACTION:
-            action_history_text = f"{node.id}: {node.description}; Playwright Action: {node.action}"
-            if node.action_error:
-                action_history_text += f"; Error: {node.action_error}"
-            else:
-                action_history_text += "; SUCCESS"
-            self.action_history.append(action_history_text)
 
     def _propagate_failure(self, node: Node):
         parent = node.parent
