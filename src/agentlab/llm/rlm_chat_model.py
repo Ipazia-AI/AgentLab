@@ -100,6 +100,8 @@ class RLMChatModel(AbstractChatModel):
         # Observation dict and action_set set by GenericAgent before each call
         self.obs: dict | None = None
         self.action_set = None
+        self.current_task_name: str | None = None
+        self._last_task_name: str | None = None
 
         # Stats tracking
         self._llm_calls = 0
@@ -132,6 +134,16 @@ class RLMChatModel(AbstractChatModel):
         self._llm_calls = 0
         self._iterations = 0
         self._n_retry = 0
+
+        if self.current_task_name is not None and self._last_task_name is not None:
+            if self.current_task_name != self._last_task_name:
+                logger.info(
+                    "RLM model instance switched task context from '%s' to '%s'",
+                    self._last_task_name,
+                    self.current_task_name,
+                )
+        if self.current_task_name is not None:
+            self._last_task_name = self.current_task_name
 
         # Extract query and context from self.obs (set by GenericAgent)
         query, context, images = self._extract_query_and_context(messages)

@@ -94,10 +94,14 @@ agent_args = GenericAgentArgs(
 # 4. Setup Benchmark
 benchmark_name = "workarena_l1"
 benchmark = bgym.DEFAULT_BENCHMARKS[benchmark_name](n_repeats=10)
+task_name_regex = os.getenv(
+    "RLM_TASK_REGEX",
+    "workarena.servicenow.order-apple-watch|workarena.servicenow.all-menu",
+)
 
 # Specifically target a simple task for testing
 try:
-    benchmark = benchmark.subset_from_regexp("task_name", "workarena.servicenow.order-apple-watch")
+    benchmark = benchmark.subset_from_regexp("task_name", task_name_regex)
 except (AttributeError, Exception) as e:
     logger.warning(f"Could not filter benchmark: {e}. Running full benchmark if needed.")
 print(benchmark)
@@ -120,6 +124,8 @@ if __name__ == "__main__":
     print(f"  Base model: {base_model_args.model_name}")
     print(f"  RLM max_iterations: {rlm_model_args.max_iterations}")
     print(f"  RLM max_depth: {rlm_model_args.max_depth}")
+    print(f"  Task regex: {task_name_regex}")
+    print(f"  Backend: {parallel_backend}, n_jobs: {n_jobs}")
 
     study.run(
         n_jobs=n_jobs,
