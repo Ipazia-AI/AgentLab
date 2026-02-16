@@ -58,29 +58,42 @@ rlm_model_args = RLMModelArgs(
 )
 
 # Use standard flags for MiniWob
-flags = GenericPromptFlags(
+flags =  GenericPromptFlags(
     obs=ObsFlags(
         use_html=True,
-        use_ax_tree=True,  # Use Accessibility Tree
+        use_ax_tree=True,
         use_focused_element=True,
-        use_error_logs=False,
+        use_error_logs=True,
         use_history=True,
-        use_past_error_logs=True,
+        use_past_error_logs=False,
         use_action_history=True,
-        use_think_history=True,
-        use_diff=True,
+        use_think_history=True, 
+        use_diff=False,
+        html_type="pruned_html",
         use_screenshot=False,
+        use_som=False,
+        extract_visible_tag=True,
+        extract_clickable_tag=True,
+        extract_coords="False",
+        filter_visible_elements_only=False,
     ),
-    use_abstract_example=False,
-    use_concrete_example=False,
-    enable_chat=True,
     action=ActionFlags(
-        action_set=HighLevelActionSetArgs(
-            subsets=["bid", "nav"],  # Enable basic interactions and navigation
-            multiaction=False,
-            strict=False,  # Allow imperfect actions
-        )
+        multi_actions=False,
+        action_set="bid",
+        long_description=False,
+        individual_examples=False,
     ),
+    use_plan=False,
+    use_criticise=False,
+    use_thinking=True,
+    use_memory=False,
+    use_concrete_example=True,
+    use_abstract_example=True,
+    use_hints=True,
+    enable_chat=False,
+    max_prompt_tokens=40_000,
+    be_cautious=True,
+    extra_instructions=None,
 )
 
 # 3. Create GenericAgent with RLM-enhanced LLM
@@ -92,17 +105,17 @@ agent_args = GenericAgentArgs(
 
 # 4. Setup Benchmark
 benchmark_name = "workarena_l1"
-benchmark = bgym.DEFAULT_BENCHMARKS[benchmark_name](n_repeats=10)
+benchmark = bgym.DEFAULT_BENCHMARKS[benchmark_name](n_repeats=1)
 
 # Specifically target a simple task for testing
 try:
-    benchmark = benchmark.subset_from_regexp("task_name", "workarena.servicenow.order-apple-watch")
+    benchmark = benchmark.subset_from_regexp("task_name", "workarena.servicenow.all-menu")
 except (AttributeError, Exception) as e:
     logger.warning(f"Could not filter benchmark: {e}. Running full benchmark if needed.")
 print(benchmark)
 # 5. Run Study
-n_jobs = 5  # Sequential execution for debugging
-parallel_backend = "ray"
+n_jobs = 1  # Sequential execution for debugging
+parallel_backend = "sequential"
 
 if __name__ == "__main__":
     study = Study([agent_args], benchmark, logging_level_stdout=logging.INFO, logging_level=logging.INFO)

@@ -27,7 +27,7 @@ answer = llm_query(f"What is the magic number in the context? Here is the chunk:
 print(answer)
 ```
 
-When you need to execute code, include at most ONE fenced code block with the 'repl' language identifier.
+When you need to execute code, respond with exactly ONE fenced code block with the 'repl' language identifier and nothing else.
 When you are ready to answer, respond with FINAL(...) and do NOT include a repl code block.
 
 The above code will be executed by read and sent to the REPL interpreter, and the answer will be printed to the console, in a sequent step you will have access to the answer variable and you will further use it to guide your reasoning process, so try to write code that will be useful for you to use in the next step, and not multiple separated blocks of code.

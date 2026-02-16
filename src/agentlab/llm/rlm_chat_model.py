@@ -189,6 +189,20 @@ class RLMChatModel(AbstractChatModel):
                 exec_result = f"Unexpected error: {str(e)}"
                 logging.warning(f"RLM REPL error: {e}")
 
+            # Guardrail: when no repl block or malformed code, request a single valid repl block
+            if exec_result.startswith("No code block found") or exec_result.startswith(
+                "Empty code block"
+            ):
+                exec_result = (
+                    f"{exec_result}\n\n"
+                    "Please respond with exactly ONE ```repl``` code block and nothing else."
+                )
+            elif exec_result.startswith("Error:"):
+                exec_result = (
+                    f"{exec_result}\n\n"
+                    "Please fix the code and respond with exactly ONE ```repl``` code block and nothing else."
+                )
+
             self._log_repl_result(iteration + 1, exec_result)
 
             # Add to conversation
