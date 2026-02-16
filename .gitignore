@@ -181,3 +181,5 @@ experiments/*
 
 # setuptools_scm generated version file
 src/agentlab/_version.py
+
+.tmp_results/

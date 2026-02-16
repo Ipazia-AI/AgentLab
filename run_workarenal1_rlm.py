@@ -8,6 +8,7 @@ Based on run_miniwob_agentq.py but using the RLM approach instead of AgentQ.
 """
 
 import logging
+import os
 from pathlib import Path
 
 import bgym
@@ -105,25 +106,39 @@ agent_args = GenericAgentArgs(
 
 # 4. Setup Benchmark
 benchmark_name = "workarena_l1"
-benchmark = bgym.DEFAULT_BENCHMARKS[benchmark_name](n_repeats=1)
+benchmark = bgym.DEFAULT_BENCHMARKS[benchmark_name](n_repeats=10)
+task_name_regex = os.getenv(
+    "RLM_TASK_REGEX",
+    "workarena.servicenow.order-apple-watch|workarena.servicenow.all-menu",
+)
 
 # Specifically target a simple task for testing
 try:
-    benchmark = benchmark.subset_from_regexp("task_name", "workarena.servicenow.all-menu")
+    benchmark = benchmark.subset_from_regexp("task_name", task_name_regex)
 except (AttributeError, Exception) as e:
     logger.warning(f"Could not filter benchmark: {e}. Running full benchmark if needed.")
 print(benchmark)
 # 5. Run Study
-n_jobs = 1  # Sequential execution for debugging
-parallel_backend = "sequential"
+n_jobs = int(os.getenv("RLM_N_JOBS", "5"))
+parallel_backend = os.getenv("RLM_PARALLEL_BACKEND", "ray")
 
 if __name__ == "__main__":
-    study = Study([agent_args], benchmark, logging_level_stdout=logging.INFO, logging_level=logging.INFO)
+    # RLM steps can be substantially slower than generic prompting.
+    # Increase timeout budget to avoid premature Ray cancellations.
+    study = Study(
+        [agent_args],
+        benchmark,
+        logging_level_stdout=logging.INFO,
+        logging_level=logging.INFO,
+        avg_step_timeout=120,
+    )
 
     print(f"Starting Study on {benchmark_name} with GenericAgent + RLM...")
     print(f"  Base model: {base_model_args.model_name}")
     print(f"  RLM max_iterations: {rlm_model_args.max_iterations}")
     print(f"  RLM max_depth: {rlm_model_args.max_depth}")
+    print(f"  Task regex: {task_name_regex}")
+    print(f"  Backend: {parallel_backend}, n_jobs: {n_jobs}")
 
     study.run(
         n_jobs=n_jobs,

@@ -24,6 +24,7 @@ Example usage:
     rlm = args.make_model()
 """
 
+import json
 import logging
 import re
 from dataclasses import dataclass, field
@@ -99,6 +100,8 @@ class RLMChatModel(AbstractChatModel):
         # Observation dict and action_set set by GenericAgent before each call
         self.obs: dict | None = None
         self.action_set = None
+        self.current_task_name: str | None = None
+        self._last_task_name: str | None = None
 
         # Stats tracking
         self._llm_calls = 0
@@ -127,6 +130,21 @@ class RLMChatModel(AbstractChatModel):
         if self._current_depth >= self.max_depth:
             raise MaxDepthError(f"Max recursion depth ({self.max_depth}) exceeded")
 
+        # Track stats per get_action call (not cumulatively across the episode)
+        self._llm_calls = 0
+        self._iterations = 0
+        self._n_retry = 0
+
+        if self.current_task_name is not None and self._last_task_name is not None:
+            if self.current_task_name != self._last_task_name:
+                logger.info(
+                    "RLM model instance switched task context from '%s' to '%s'",
+                    self._last_task_name,
+                    self.current_task_name,
+                )
+        if self.current_task_name is not None:
+            self._last_task_name = self.current_task_name
+
         # Extract query and context from self.obs (set by GenericAgent)
         query, context, images = self._extract_query_and_context(messages)
 
@@ -146,7 +164,7 @@ class RLMChatModel(AbstractChatModel):
         task_info = "Note: [bid] is the unique alpha-numeric identifier at the beginning of lines for each element in the AXTree. Always use bid to refer to elements in your actions. The axtree and other important information are provided in the context variable which is a dictionary with the following keys: context['axtree'] (accessibility tree), context['html'], context['goal'], context['error'], you MUST look through it at least once before answering your query."
         rlm_messages: list[dict] = [
             {"role": "system", "content": REPL_SYSTEM_PROMPT},
-            {"role": "user", "content": task_info + "\n\n" + query + "\n\n" + USER_PROMPT},
+            {"role": "user", "content": task_info + "\n\n" + query + "\n\n" + USER_PROMPT.format(query=query)},
         ]
 
         # If there are images, add them to the first user message
@@ -300,6 +318,11 @@ class RLMChatModel(AbstractChatModel):
         """
         return {
             "context": context,  # Dict with axtree, html, history, etc.
+            # Backward-compatible aliases used frequently by model-generated code
+            "axtree_str": context.get("axtree", ""),
+            "html_str": context.get("html", ""),
+            "goal": context.get("goal", ""),
+            "last_action_error": context.get("error", ""),
             "query": query,
             "llm_query": self._make_llm_query_fn(),
             "re": re,  # Pre-import re module
@@ -346,7 +369,7 @@ class RLMChatModel(AbstractChatModel):
             A function that takes a prompt string and returns the LLM response
         """
 
-        def llm_query(prompt: str) -> str:
+        def llm_query(prompt: Any) -> str:
             """
             Query the LLM with the given prompt.
 
@@ -363,7 +386,15 @@ class RLMChatModel(AbstractChatModel):
                 return f"Max recursion depth ({self.max_depth}) reached"
 
             # Build simple messages for direct LLM call
-            messages = [{"role": "user", "content": prompt}]
+            if isinstance(prompt, str):
+                prompt_text = prompt
+            else:
+                # Some generated REPL code passes dict/list; coerce instead of crashing.
+                try:
+                    prompt_text = json.dumps(prompt, ensure_ascii=True)
+                except TypeError:
+                    prompt_text = str(prompt)
+            messages = [{"role": "user", "content": prompt_text}]
 
             try:
                 # Call the recursive model directly (not wrapped in RLM)

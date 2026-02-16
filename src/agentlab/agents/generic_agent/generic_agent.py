@@ -21,6 +21,7 @@ from agentlab.agents import dynamic_prompting as dp
 from agentlab.agents.agent_args import AgentArgs
 from agentlab.llm.chat_api import BaseModelArgs
 from agentlab.llm.llm_utils import Discussion, ParseError, SystemMessage, retry
+from agentlab.llm.rlm_chat_model import MaxIterationsError
 from agentlab.llm.tracking import cost_tracker_decorator
 
 from .generic_agent_prompt import GenericPromptFlags, MainPrompt
@@ -94,6 +95,9 @@ class GenericAgent(Agent):
     def obs_preprocessor(self, obs: dict) -> dict:
         return self._obs_preprocessor(obs)
 
+    def set_task_name(self, task_name: str):
+        self.task_name = task_name
+
     @cost_tracker_decorator
     def get_action(self, obs):
 
@@ -128,6 +132,7 @@ class GenericAgent(Agent):
             # Pass raw obs and action_set to chat_llm for RLM context building
             self.chat_llm.obs = obs
             self.chat_llm.action_set = self.action_set
+            self.chat_llm.current_task_name = getattr(self, "task_name", None)
             ans_dict = retry(
                 self.chat_llm,
                 chat_messages,
@@ -137,16 +142,32 @@ class GenericAgent(Agent):
             ans_dict["busted_retry"] = 0
             # inferring the number of retries, TODO: make this less hacky
             ans_dict["n_retry"] = (len(chat_messages) - 3) / 2
+            ans_dict["rlm_max_iterations_fallback"] = 0
+        except MaxIterationsError as e:
+            # RLM-specific graceful fallback: continue episode with a safe noop action.
+            ans_dict = dict(
+                action="noop()",
+                think=(
+                    "RLM fallback: max iterations reached without FINAL(); "
+                    "using noop() to continue safely."
+                ),
+                n_retry=0,
+                busted_retry=0,
+                rlm_max_iterations_fallback=1,
+                rlm_fallback_reason=str(e),
+            )
         except ParseError as e:
             ans_dict = dict(
                 action=None,
                 n_retry=self.max_retry + 1,
                 busted_retry=1,
+                rlm_max_iterations_fallback=0,
             )
 
         stats = self.chat_llm.get_stats()
         stats["n_retry"] = ans_dict["n_retry"]
         stats["busted_retry"] = ans_dict["busted_retry"]
+        stats["rlm_max_iterations_fallback"] = ans_dict.get("rlm_max_iterations_fallback", 0)
 
         self.plan = ans_dict.get("plan", self.plan)
         self.plan_step = ans_dict.get("step", self.plan_step)
@@ -158,12 +179,20 @@ class GenericAgent(Agent):
             think=ans_dict.get("think", None),
             chat_messages=chat_messages,
             stats=stats,
-            extra_info={"chat_model_args": asdict(self.chat_model_args)},
+            extra_info={
+                "chat_model_args": asdict(self.chat_model_args),
+                "rlm_fallback_reason": ans_dict.get("rlm_fallback_reason", None),
+            },
         )
+
+        # Avoid accidentally carrying references between steps/tasks.
+        self.chat_llm.obs = None
+        self.chat_llm.action_set = None
         return ans_dict["action"], agent_info
 
     def reset(self, seed=None):
         self.seed = seed
+        self.task_name = None
         self.plan = "No plan yet"
         self.plan_step = -1
         self.memories = []
