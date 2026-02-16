@@ -1,0 +1,27 @@
+The plan below was generated to solve a task. Your job is to refine this plan by removing redundancy while preserving all necessary steps.
+
+## Task
+
+{task}
+
+## Current Plan
+
+{plan}
+
+## Instructions
+
+Review the plan and remove ONLY:
+- Exact duplicate subtasks that repeat the same action
+- Circular logic where a step checks if something is itself
+- Redundant verification steps that check the same condition multiple times
+
+You MUST preserve:
+- All distinct actions required to complete the task
+- All specific details, identifiers, and parameters
+- The hierarchical structure and numbering format
+- All dependency references (e.g., "from sub-problem [1]", "based on [2]", "using 'task_id'")
+- Verification and error handling steps
+
+Output ONLY the refined plan. Do not include explanations, headers, or the phrase "CURRENT PLAN:". Start directly with the task description.
+
+Answer:

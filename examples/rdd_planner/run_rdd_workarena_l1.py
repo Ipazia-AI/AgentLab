@@ -9,11 +9,12 @@ from dotenv import load_dotenv
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from rdd_agent import RDDAgentArgs
-from agentlab.llm.chat_api import OpenRouterModelArgs
-from agentlab.agents.generic_agent.tmlr_config import BASE_FLAGS
-from agentlab.experiments.study import make_study
 import bgym
+
+from agentlab.agents.generic_agent.tmlr_config import BASE_FLAGS
+from agentlab.agents.rdd_agent import RDDAgentArgs
+from agentlab.experiments.study import make_study
+from agentlab.llm.chat_api import OpenRouterModelArgs
 
 load_dotenv()
 
@@ -23,13 +24,13 @@ load_dotenv()
 TASK_INDEX = 0          # Which task to run (0 = first task)
 USE_PLAN = True        # Enable RDD planning
 USE_AXTREE = True      # Use AXTree for planning
-HEADLESS = False        # Run browser in headless mode (True = no GUI)
+HEADLESS = True        # Run browser in headless mode (True = no GUI)
 USE_PLAN_REFINER = True # Enable plan refinement (default: True)
 REFINER_ITERATIONS = 2  # Number of refinement iterations (default: 2)
 # ============================================================================
 
 if __name__ == "__main__":
-    print("RDD Planner + MiniWoB Integration\n")
+    print("RDD Planner + WorkArena Integration\n")
     
     # Configure model
     model_args = OpenRouterModelArgs(
@@ -99,4 +100,5 @@ if __name__ == "__main__":
     else:
         print("⚠ No reward column found in results")
     
+    print(f"📁 Results: {study.dir}")
     print(f"📁 Results: {study.dir}")

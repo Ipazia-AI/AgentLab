@@ -36,6 +36,16 @@
             "env": {
                 "AGENTLAB_DEBUG": "1"
             }
+        },
+        {
+            "name": "RDD Planner",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/examples/rdd_planner/run_rdd_workarena_l1.py",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "cwd": "${workspaceFolder}",
+            "python": "${workspaceFolder}/.venv/bin/python"
         }
     ]
 }
