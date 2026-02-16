@@ -19,7 +19,7 @@ You MUST preserve:
 - All distinct actions required to complete the task
 - All specific details, identifiers, and parameters
 - The hierarchical structure and numbering format
-- All dependency references (e.g., "from sub-problem [1]", "based on [2]", "using {task_id}")
+- All dependency references (e.g., "from sub-problem [1]", "based on [2]", "using 'task_id'")
 - Verification and error handling steps
 
 Output ONLY the refined plan. Do not include explanations, headers, or the phrase "CURRENT PLAN:". Start directly with the task description.
