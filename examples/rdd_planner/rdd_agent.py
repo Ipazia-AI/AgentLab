@@ -71,7 +71,7 @@ class RDDAgentArgs(GenericAgentArgs):
     task: str | None = None  # natural-language task or BrowserGym task_name
     initial_state: str = ""  # Auto-extracted from observation when available
     use_axtree: bool = True  # Whether to extract and use AXTree for planning
-    use_html: bool = True    # Whether to extract and use HTML for planning
+    use_html: bool = False    # Whether to extract and use HTML for planning
     use_plan_refiner: bool = True  # Whether to refine the plan after generation
     refiner_iterations: int = 2  # Number of refinement iterations
 
@@ -139,18 +139,6 @@ class RDDAgentArgs(GenericAgentArgs):
                 html = extract_html(obs)
                 if html:
                     print(f"✓ Extracted HTML: {len(html)} characters")
-                    
-                    # Save HTML to file for debugging
-                    from pathlib import Path
-                    debug_dir = Path(__file__).parent / "debug_html"
-                    debug_dir.mkdir(exist_ok=True)
-                    
-                    # Create filename from task name
-                    safe_task_name = task_name.replace(".", "_").replace("/", "_")
-                    html_file = debug_dir / f"{safe_task_name}.html"
-                    
-                    html_file.write_text(html, encoding="utf-8")
-                    print(f"  💾 Saved HTML to: {html_file}")
                 else:
                     print("⚠ No HTML found in observation")
             
@@ -230,6 +218,15 @@ class RDDAgentArgs(GenericAgentArgs):
                     print(f"   • {note}")
                 print()
             
+            # Store planning data to JSON (temporary - will be removed later)
+            action_set_list = [list(action_set.action_set)] if hasattr(action_set, 'action_set') else [list(action_set)]
+            store_planning_data_to_json(
+                plan_before_refinement=initial_plan,
+                plan_after_refinement=final_plan,
+                task_name=self.task,
+                action_set_at_steps=action_set_list
+            )
+            
             return final_plan
         
         return initial_plan
@@ -259,4 +256,63 @@ class RDDAgentArgs(GenericAgentArgs):
         return agent
 
 
-__all__ = ["RDDAgentArgs"]
+def store_planning_data_to_json(
+    plan_before_refinement: str,
+    plan_after_refinement: str,
+    task_name: str,
+    action_set_at_steps: list[list[str]],
+    output_dir: str = "planning_data"
+) -> str:
+    """
+    Store planning data as JSON array element.
+    
+    Args:
+        plan_before_refinement: Initial plan before refinement
+        plan_after_refinement: Final plan after refinement
+        task_name: Name of the task
+        action_set_at_steps: List of action sets at each step (array of arrays)
+        output_dir: Directory to store the JSON file
+    
+    Returns:
+        Path to the saved JSON file
+    """
+    import json
+    from pathlib import Path
+    from datetime import datetime
+    
+    # Create output directory
+    output_path = Path(__file__).parent / output_dir
+    output_path.mkdir(exist_ok=True)
+    
+    # Create data entry
+    data_entry = {
+        "plan_before_refinement": plan_before_refinement,
+        "plan_after_refinement": plan_after_refinement,
+        "time": datetime.now().isoformat(),
+        "task_name": task_name,
+        "action_set_at_steps": action_set_at_steps
+    }
+    
+    # Create filename from task name
+    safe_task_name = task_name.replace(".", "_").replace("/", "_")
+    json_file = output_path / f"{safe_task_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+    
+    # Load existing data if file exists, otherwise create new array
+    if json_file.exists():
+        with open(json_file, "r", encoding="utf-8") as f:
+            data_array = json.load(f)
+    else:
+        data_array = []
+    
+    # Append new entry
+    data_array.append(data_entry)
+    
+    # Save to file
+    with open(json_file, "w", encoding="utf-8") as f:
+        json.dump(data_array, f, indent=2, ensure_ascii=False)
+    
+    print(f"  💾 Saved planning data to: {json_file}")
+    return str(json_file)
+
+
+__all__ = ["RDDAgentArgs", "store_planning_data_to_json"]
