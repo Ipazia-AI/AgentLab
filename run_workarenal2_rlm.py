@@ -36,7 +36,8 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 load_dotenv(find_dotenv())
 
-MODEL_NAME = "openai/gpt-5-mini"
+# MODEL_NAME = "openai/gpt-5-mini"
+MODEL_NAME = "openai/gpt-5"
 # MODEL_NAME = "openai/gpt-5.2"
 
 # ---------------------------------------------------------------------------
@@ -78,11 +79,11 @@ rlm_model_args = RLMModelArgs(
 # ---------------------------------------------------------------------------
 flags = GenericPromptFlags(
     obs=ObsFlags(
-        use_html=True,
-        use_ax_tree=True,
+        use_html=False,
+        use_ax_tree=False,
         use_focused_element=True,
         use_error_logs=False,
-        use_history=True,
+        use_history=False,
         use_past_error_logs=True,
         use_action_history=True,
         use_think_history=True,

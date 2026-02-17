@@ -36,14 +36,14 @@ load_dotenv(find_dotenv())
 # Base model to wrap with RLM
 # You can use any provider: OpenAI, Anthropic, LiteLLM, etc.
 base_model_args = OpenRouterModelArgs(
-    model_name="openai/gpt-5-mini",
+    model_name="openai/gpt-5",
     max_new_tokens=None,
     temperature=None,
 )
 
 # Optional: Use a cheaper model for recursive sub-calls
 recursive_model_args = OpenRouterModelArgs(
-    model_name="openai/gpt-5-mini",
+    model_name="openai/gpt-5",
     max_new_tokens=None,
     temperature=None,
 )
@@ -59,16 +59,16 @@ rlm_model_args = RLMModelArgs(
 )
 
 # Use standard flags for MiniWob
-flags =  GenericPromptFlags(
+flags = GenericPromptFlags(
     obs=ObsFlags(
-        use_html=True,
-        use_ax_tree=True,
+        use_html=False,
+        use_ax_tree=False,
         use_focused_element=True,
         use_error_logs=True,
-        use_history=True,
+        use_history=False,
         use_past_error_logs=False,
         use_action_history=True,
-        use_think_history=True, 
+        use_think_history=True,
         use_diff=False,
         html_type="pruned_html",
         use_screenshot=False,
