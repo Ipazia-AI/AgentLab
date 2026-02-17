@@ -28,6 +28,20 @@ class HPA:
         self.task_progress_summary: str | None = None
         self.previous_notes: str | None = None
         self.pending_node: Node | None = None
+        self.completed_nodes: list[Node] = []
+        self._counter: int = 0
+
+    def get_plan(self) -> (list[str], list[str]):
+        completed_plan = [node.description for node in self.completed_nodes]
+        pending_plan = [
+            node.description
+            for node, state in reversed(self.stack)
+            if node.id != "0"
+            and state != NodeState.EXITING
+            and (node.status == NodeStatus.UNVISITED or node.type == NodeType.UNKNOWN)
+        ]
+
+        return completed_plan, pending_plan
 
     def set_goal(self, obs_first: dict):
         self.goal = obs_first["goal"]
@@ -61,8 +75,8 @@ class HPA:
 
         return None
 
-    def complete_pending(self, obs: dict):
-        action_error = obs.get("last_action_error")
+    def complete_pending(self, obs_history: list[dict]):
+        action_error = obs_history[-1].get("last_action_error", "")
         success = True if action_error == "" else False
         if success:
             self.pending_node.status = NodeStatus.SUCCESS
@@ -83,7 +97,9 @@ class HPA:
         node.execution_count += 1
 
         if node.type == NodeType.UNKNOWN:
-            self._expand_node(node, expansion_function)
+            expansion_function(
+                node.description, self.get_plan(), lambda x: self._apply_expansion(node, x)
+            )
             self.stack.append((node, NodeState.EXITING))
 
         if node.type == NodeType.ACTION:
@@ -114,6 +130,7 @@ class HPA:
     # Algo 3 from the HPA paper
     def _process_node_exiting(self, node: Node):
         if node.type == NodeType.ACTION:
+            self.completed_nodes.append(node)
             if node.status in {NodeStatus.FAIL, NodeStatus.PRUNED}:
                 self.stack.append((node, NodeState.FAILED))
                 return
@@ -141,7 +158,7 @@ class HPA:
     def _process_node_failed(self, node: Node):
         if node.type == NodeType.ACTION:
             node.status = NodeStatus.PRUNED
-            #  If a failed ACTION node belongs to an
+            # If a failed ACTION node belongs to an
             # AND node, the agent deletes all remaining unexecuted siblings (This is what the _propagate_failure function does)
             self._propagate_failure(node)
             return
@@ -179,32 +196,20 @@ class HPA:
                     node.status = NodeStatus.PRUNED
                     self._propagate_failure(node)
 
-    def _expand_node(self, node: Node, expansion_function) -> Node:
-
-        node_info = (str(node),)
-        local_tree_info = (self._describe_local_tree(node),)
-
-        expanded_node = expansion_function(
-            node_info, local_tree_info, lambda x: self._apply_expansion(node, x)
-        )
-
-        return expanded_node
-
-    def _apply_expansion(self, node: Node, expansion: dict) -> NodeType:
+    def _apply_expansion(self, node: Node, expansion: dict):
         node_type = str(expansion.get("node_type", "")).upper().strip()
         if node_type == "ACTION":
-            action = expansion.get("expansion")
-            if not isinstance(action, str) or not action.strip():
-                raise ParseError("ACTION node requires a non-empty 'expansion' string.")
-            node.action = action.strip()
-            return NodeType.ACTION
+            node.type = NodeType.ACTION
+            return
 
         if node_type not in {"AND", "OR"}:
             raise ParseError("node_type must be ACTION, AND, or OR.")
 
+        node.type = NodeType.AND if node_type == "AND" else NodeType.OR
+
         node.description = expansion.get("node_description", node.description)
 
-        children = expansion.get("expansion", [])
+        children = expansion.get("node_expansion", [])
         if not isinstance(children, list) or not children:
             raise ParseError("AND/OR node requires a non-empty 'expansion' list.")
 
@@ -214,23 +219,22 @@ class HPA:
                 continue
             score = None
             clean_text = child_text.strip()
-            if node_type == "OR":
-                score, clean_text = self._extract_score(clean_text)
+            # if node_type == "OR":
+            #     score, clean_text = self._extract_score(clean_text)
             child = Node(type=NodeType.UNKNOWN, description=clean_text, parent=node, score=score)
             node.add_child(child)
-        return NodeType.AND if node_type == "AND" else NodeType.OR
 
-    def _extract_score(self, text: str) -> tuple[float | None, str]:
-        if "(score:" not in text:
-            return None, text
-        try:
-            before, after = text.split("(score:", 1)
-            score_part = after.split(")", 1)[0]
-            score = float(score_part.strip())
-            cleaned = (before + after.split(")", 1)[1]).strip()
-            return score, cleaned
-        except (ValueError, IndexError):
-            return None, text
+    # def _extract_score(self, text: str) -> tuple[float | None, str]:
+    #     if "(score:" not in text:
+    #         return None, text
+    #     try:
+    #         before, after = text.split("(score:", 1)
+    #         score_part = after.split(")", 1)[0]
+    #         score = float(score_part.strip())
+    #         cleaned = (before + after.split(")", 1)[1]).strip()
+    #         return score, cleaned
+    #     except (ValueError, IndexError):
+    #         return None, text
 
     def _select_promising_child(self, node: Node) -> Node:
         valid_children = self._get_valid_children(node)

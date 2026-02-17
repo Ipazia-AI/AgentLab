@@ -97,16 +97,24 @@ class HPAAgent(GenericAgent):
 
         self._infer_insight()
         self.pending_action_node = self.hpa.get_action_node(self._infer_plan)
-        chat_messages, stats = self._infer_action()
+        if self.pending_action_node is not None:
+            chat_messages, stats = self._infer_action()
 
-        agent_info = AgentInfo(
-            think=self.thoughts[-1],
-            chat_messages=chat_messages,
-            stats=stats,
-            extra_info={"chat_model_args": asdict(self.chat_model_args)},
-        )
+            agent_info = AgentInfo(
+                think=self.thoughts[-1],
+                chat_messages=chat_messages,
+                stats=stats,
+                extra_info={"chat_model_args": asdict(self.chat_model_args)},
+            )
 
-        return self.actions[-1], agent_info
+            return self.actions[-1], agent_info
+        else:
+            return None, AgentInfo(
+                think=None,
+                chat_messages=Discussion(),
+                stats=self.chat_llm.get_stats(),
+                extra_info={"chat_model_args": asdict(self.chat_model_args)},
+            )
 
     def _infer_insight(self):
         ans_dict, chat_messages, stats = self._infer(
@@ -120,18 +128,22 @@ class HPAAgent(GenericAgent):
             SystemMessage(SystemInsightPrompt().prompt),
         )
 
-        self.constraints = ans_dict.get("constraints", None)
+        self.constraints = ans_dict.get("constraint", None)
         self.progress = ans_dict.get("progress", None)
         self.suggestion = ans_dict.get("suggestion", None)
 
-    def _infer_plan(self, node_info: str, local_tree_info: str, apply_expansion):
+    def _infer_plan(self, node_info: str, actual_plan: (list[str], list[str]), apply_expansion):
         ans_dict, chat_messages, stats = self._infer(
             PlanningPrompt(
                 obs_history=self.obs_history,
                 actions=self.actions,
                 memories=self.memories,
                 thoughts=self.thoughts,
-                action_set=self.action_set,
+                constraints=self.constraints,
+                progress=self.progress,
+                suggestion=self.suggestion,
+                actual_plan=actual_plan,
+                node_info=node_info,
                 flags=self.flags,
             ),
             SystemMessage(SystemPlanningPrompt().prompt),
@@ -148,13 +160,16 @@ class HPAAgent(GenericAgent):
                 actions=self.actions,
                 memories=self.memories,
                 thoughts=self.thoughts,
+                current_plan_step=self.pending_action_node.description,
+                completed_plan_steps=self.hpa.get_plan()[0],
+                future_plan_steps=self.hpa.get_plan()[1],
                 flags=self.flags,
             ),
             SystemMessage(dp.SystemPrompt().prompt),
         )
 
-        self.plan = ans_dict.get("plan", self.plan)
-        self.plan_step = ans_dict.get("step", self.plan_step)
+        # self.plan = ans_dict.get("plan", self.plan)
+        # self.plan_step = ans_dict.get("step", self.plan_step)
         self.actions.append(ans_dict.get("action", None))
         self.memories.append(ans_dict.get("memory", None))
         self.thoughts.append(ans_dict.get("think", None))

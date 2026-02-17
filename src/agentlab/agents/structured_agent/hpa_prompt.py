@@ -24,6 +24,12 @@ class HPAPromptFlags(dp.Flags):
     use_planning: bool = True
     use_concrete_example: bool = True
     use_abstract_example: bool = False
+    use_hints: bool = False
+    use_plan: bool = False  #
+    be_cautious: bool = False
+    use_criticise: bool = False  #
+    use_thinking: bool = False
+    use_memory: bool = False  #
     max_prompt_tokens: int = None
     max_trunc_itr: int = 20
     extra_instructions: str | None = None
@@ -32,30 +38,16 @@ class HPAPromptFlags(dp.Flags):
 class Constraint(dp.PromptElement):
     _prompt = ""
     _abstract_ex = """
-<constraints>
-Identify a list of constraints that apply to the overall goal.
-A constraint is an explicitly stated condition that affects the goal execution.
-</constraints>
+<constraints>Identify a list of constraints that apply to the overall goal.
+A constraint is an explicitly stated condition that affects the goal execution.</constraints>
 """
 
     _concrete_ex = """
-<constraints>
-    <constraint>
-    Laptop bag color: black
-    </constraint>
-    <constraint>
-    Laptop price: under $40
-    </constraint>
-    <constraint>
-    Mouse type: wireless
-    </constraint>
-    <constraint>
-    Wireless mouse price: under $25
-    </constraint>
-    <constraint>
-    Delivery time: within 2 days
-    </constraint>
-</constraints>
+<constraints><constraint>Laptop bag color: black</constraint>
+<constraint>Laptop price: under $40</constraint>
+<constraint>Mouse type: wireless</constraint>
+<constraint>Wireless mouse price: under $25</constraint>
+<constraint>Delivery time: within 2 days</constraint></constraints>
 """
 
     def _parse_answer(self, text_answer):
@@ -68,18 +60,14 @@ A constraint is an explicitly stated condition that affects the goal execution.
 class Progress(dp.PromptElement):
     _prompt = ""
     _abstract_ex = """
-<progress>
-Summarize actions actually taken and assess each explicitly stated task requirement or constraint.
-Diagnose why the task is not complete.
-</progress>
+<progress>Summarize actions actually taken and assess each explicitly stated task requirement or constraint.
+Diagnose why the task is not complete.</progress>
 """
 
     _concrete_ex = """
-<progress>
-The agent navigated to an Amazon search results page and identified a relevant listing matching the model, 
-color, storage, and condition constraints. All explicitly defined constraints appear satisfied on the listing.
-However, the task is not complete because the agent has not clicked the product, verified details on the product page, or added the item to the cart.
-</progress>
+<progress>The agent navigated to an Amazon search results page and identified a relevant listing matching the model, color, storage, and condition constraints.
+All explicitly defined constraints appear satisfied on the listing.
+However, the task is not complete because the agent has not clicked the product, verified details on the product page, or added the item to the cart.</progress>
 """
 
     def _parse_answer(self, text_answer):
@@ -93,16 +81,12 @@ class Suggestion(dp.PromptElement):
 
     _prompt = ""
     _abstract_ex = """
-<suggestion>
-Identify all new information grounded in observation that can help complete the task.
-</suggestion>
+<suggestion>Identify all new information grounded in observation that can help complete the task.</suggestion>
 """
 
     _concrete_ex = """
-<suggestion>
-Found relevant iPhone 12 Pro listing matching requirements: model iPhone 12 Pro, 128GB, 
-Pacific Blue, price $314.39, condition renewed, fully unlocked, rating 4.1/5 from 12,669 reviews.
-</suggestion>
+<suggestion>Found relevant iPhone 12 Pro listing matching requirements: model iPhone 12 Pro, 128GB, 
+Pacific Blue, price $314.39, condition renewed, fully unlocked, rating 4.1/5 from 12,669 reviews.</suggestion>
 """
 
     def _parse_answer(self, text_answer):
@@ -236,9 +220,7 @@ Make sure to follow the template with proper tags:
 
 class PlanningInstructions(dp.PromptElement):
 
-    def __init__(
-        self, goal_object, action_prompt: dp.ActionPrompt, extra_instructions=None
-    ) -> None:
+    def __init__(self, goal_object, extra_instructions=None) -> None:
         super().__init__(visible=True)
 
         self._prompt = [
@@ -247,30 +229,29 @@ class PlanningInstructions(dp.PromptElement):
                 text="""
 # Instructions
 
-You are an excellent planner, very skilled at understanding how to interact with web pages, your goal is 
-to define a tree of nodes structure that represent the plan to accomplish the task that is being performed by a user.
+You are an excellent planner, very skilled at understanding how to interact with web pages.
+Your goal is to define a node belonging to a tree of nodes structure, that represent the plan to accomplish the task that is being performed by a user, 
+starting from a natural language description of the node.
 
 There are three possible node types that can be used to construct the tree:
 - AND Node: Represents an ordered list of logical subgoals required to achieve the node’s objective.
 - OR Node: Represents alternative sub-strategies (which can be other AND/OR nodes).
-- ACTION Node: Single executable action strictly matching one element of the list of browser actions below.
+- ACTION Node: Single executable action that can be performed on the webpage.
 
 
 Your task for the given node:
 1. Determine whether the node is an AND node, an OR node, or an ACTION node.
 2. Choose ONE of the following options:
-   A. Mark node as ACTION if the goal can be achieved using a single atomic action from the list above.
+   A. Mark node as ACTION if the goal can be achieved using a single atomic action.
    B. Expand the node if the goal cannot be solved by performing a single atomic action.
 
-# Important Rules:
+## Important Rules:
 - If you think the task can be completed through an action, mark the node as an action.
 - If you need to expand the task in subtasks, focus on expansions that will complete the task faster with high probability.
-- Before expanding the node, make sure to analyze the task progress summary and the previous notes to understand the current task progress and the previous notes.
-- Before expanding the node, pay attention to the siblings and the parent node's description in order to avoid repeating the same subgoals or strategies.
-- For AND nodes, provide the ordered list of logical subgoals.
-- For AND nodes, ensure temporal order of children is correct and efficient.
-- For OR nodes, provide a list of alternative strategies, including a (0–1) score in each string (e.g., “Strategy here (score: 0.85)”).
-- For OR nodes, choose the score based on the likelihood of success of the strategy (think deeply about the navigation strategy of the website)
+- Before expanding the node, make sure to analyze the "Progress" and the "Suggestion" provided in the Hints section.
+- DO NOT EXPAND THE NODE with subgoals already listed as "Completed Nodes" or "Not Yet Explored Nodes".
+- For AND and OR nodes, provide the ordered list of logical subgoals.
+- For AND and OR nodes, ensure temporal order of children is correct and efficient.
 - Do not add speculative or redundant subgoals.
 
 ## Goal:
@@ -289,8 +270,6 @@ Your task for the given node:
 ## Extra instructions:
 
 {extra_instructions}
-
-{action_prompt.prompt}
 """,
                 )
             ]
@@ -302,20 +281,47 @@ Your task for the given node:
             return {"suggestion": text_answer, "parse_error": str(e)}
 
 
-class NodeType(dp.PromptElement):
-    _abstract_ex = """<node_type>
-Determine whether the node is an AND node, an OR node, or an ACTION node.
-</node_type>
+class PlanningHints(dp.PromptElement):
+
+    def __init__(
+        self,
+        constraints: str,
+        progress: str,
+        suggestion: str,
+        completed_nodes_description: str,
+        not_yet_explored_nodes_description: str,
+        visible: bool = True,
+    ):
+        super().__init__(visible=visible)
+        completed_nodes_description = "\n".join(completed_nodes_description)
+        not_yet_explored_nodes_description = "\n".join(not_yet_explored_nodes_description)
+        self._prompt = f"""
+# Hints
+
+Here follows some information that can help you plan the task:
+## Constraints:
+{constraints}
+
+## Progress: {progress}
+
+## Suggestion: {suggestion}
+
+## Completed Nodes:
+{completed_nodes_description}
+
+## Not Yet Explored Nodes:
+{not_yet_explored_nodes_description}
 """
+
+
+class NodeType(dp.PromptElement):
+    _abstract_ex = """<node_type>Determine whether the node is an AND node, an OR node, or an ACTION node.</node_type>"""
 
     def __init__(self, node_type: str, visible: bool = True):
         super().__init__(visible=visible)
         self.node_type = node_type
 
-        self._concrete_ex = f"""<node_type>
-{self.node_type}
-</node_type>
-"""
+        self._concrete_ex = f"""<node_type>{self.node_type}</node_type>"""
 
     def parse_answer(self, text_answer):
         try:
@@ -326,19 +332,15 @@ Determine whether the node is an AND node, an OR node, or an ACTION node.
 
 class NodeDescription(dp.PromptElement):
 
-    _abstract_ex = """<node_description>
-Provide a textual description of the node.
-</node_description>
-"""
+    _abstract_ex = (
+        """<node_description>Provide a textual description of the node.</node_description>"""
+    )
 
     def __init__(self, description: str, visible: bool = True):
         super().__init__(visible=visible)
         self.description = description
 
-    _concrete_ex = """<node_description>
-Click on the IPhone Pro 12 128GB Pacific Blue listing
-</node_description>
-"""
+    _concrete_ex = """<node_description>Click on the IPhone Pro 12 128GB Pacific Blue listing</node_description>"""
 
     def parse_answer(self, text_answer):
         try:
@@ -349,20 +351,14 @@ Click on the IPhone Pro 12 128GB Pacific Blue listing
 
 class NodeExpansion(dp.PromptElement):
     _prompt = ""
-    _abstract_ex = """<node_expansion>
-If it's necessary to expand the node, provide a list of subgoals or alternative strategies. Otherwise, provide an empty list.
-</node_expansion>
-"""
+    _abstract_ex = """<node_expansion>If it's necessary to expand the node, provide a list of subgoals or alternative strategies. Otherwise, provide an empty list.</node_expansion>"""
 
     def __init__(self, expansions: list[str], visible: bool = True):
         super().__init__(visible=visible)
         self.expansion = expansions
 
         self._concrete_ex = "\n".join(
-            f"""<node_expansion>
-{item}
-</node_expansion>"""
-            for item in expansions
+            f"""<node_expansion>{item}</node_expansion>""" for item in expansions
         )
 
     def parse_answer(self, text_answer):
@@ -380,18 +376,13 @@ If it's necessary to expand the node, provide a list of subgoals or alternative 
 
 class NodeReasoning(dp.PromptElement):
     _prompt = ""
-    _abstract_ex = """<node_reasoning>
-Brief justification explaining the reasoning behind the node type and node expansion choices.
-</node_reasoning>
-"""
+    _abstract_ex = """<node_reasoning>Brief justification explaining the reasoning behind the node type and node expansion choices.</node_reasoning>"""
 
     def __init__(self, reasoning: str, visible: bool = True):
         super().__init__(visible=visible)
         self.reasoning = reasoning
 
-        self._concrete_ex = f"""<node_reasoning>
-{self.reasoning}
-</node_reasoning>"""
+        self._concrete_ex = f"""<node_reasoning>{self.reasoning}</node_reasoning>"""
 
     def parse_answer(self, text_answer):
         try:
@@ -417,12 +408,29 @@ class Node(dp.PromptElement, abc.ABC):
         self.reasoning = NodeReasoning(reasoning)
 
         self._abstract_ex = f"""
-{self.type._abstract_ex}{self.description._abstract_ex}{self.expansion._abstract_ex}{self.reasoning._abstract_ex}
+{self.type._abstract_ex}
+{self.description._abstract_ex}
+{self.expansion._abstract_ex}
+{self.reasoning._abstract_ex}
 """
 
-        self._concrete_ex = f"""
-{self.type._concrete_ex}{self.description._concrete_ex}{self.expansion._concrete_ex}{self.reasoning._concrete_ex}
-"""
+        self._concrete_ex = (
+            f"""
+# Concrete {self.type.node_type} Example
+
+Here is a concrete examples of how to format your answer if the node type is {self.type.node_type}.
+Make sure to follow the template with proper tags:
+{self.type._concrete_ex}
+{self.description._concrete_ex}"""
+            + (
+                f"""
+{self.expansion._concrete_ex}"""
+                if self.expansion.expansion
+                else ""
+            )
+            + f"""
+{self.reasoning._concrete_ex}"""
+        )
 
     def parse_answer(self, text_answer):
         try:
@@ -451,9 +459,6 @@ class ActionNode(Node):
 
         if "node_type" in ans_dict and ans_dict["node_type"] != "ACTION":
             raise ParseError("Action node must be classified as ACTION")
-
-        if "node_expansion" in ans_dict and ans_dict["node_expansion"] != []:
-            raise ParseError("Action node must not have any expansion")
 
         return ans_dict
 
@@ -521,18 +526,28 @@ class PlanningPrompt(dp.Shrinkable):
         actions: list[str],
         memories: list[str],
         thoughts: list[str],
-        action_set: AbstractActionSet,
+        constraints: str,
+        progress: str,
+        suggestion: str,
+        node_info: str,
+        actual_plan: (list[str], list[str]),
         flags: HPAPromptFlags,
     ):
         super().__init__()
         self.flags = flags
+        self.node_info = node_info
         self.history = dp.History(obs_history, actions, memories, thoughts, flags.obs)
         self.instructions = PlanningInstructions(
             obs_history[-1]["goal_object"],
-            action_prompt=dp.ActionPrompt(action_set, flags.action),
             extra_instructions=flags.extra_instructions,
         )
-
+        self.hints = PlanningHints(
+            constraints=constraints,
+            progress=progress,
+            suggestion=suggestion,
+            completed_nodes_description=actual_plan[0],
+            not_yet_explored_nodes_description=actual_plan[1],
+        )
         self.action_node = ActionNode(
             description="Click on the IPhone Pro 12 128GB Pacific Blue listing",
             reasoning="The item is the best match for the requirements and the price is within the budget.",
@@ -565,10 +580,16 @@ class PlanningPrompt(dp.Shrinkable):
     @property
     def _prompt(self) -> HumanMessage:
         prompt = HumanMessage(self.instructions.prompt)
+
+        # {self.history.prompt}\
+
         prompt.add_text(
             f"""\
 {self.obs.prompt}\
-{self.history.prompt}\
+{self.hints.prompt}\
+
+# NODE TO EXPAND:
+{self.node_info}
 """
         )
 
@@ -587,20 +608,9 @@ answer:
         if self.flags.use_concrete_example:
             prompt.add_text(
                 f"""
-# Concrete Examples
-
-Here is a list of concrete examples of how to format your answer.
-Make sure to follow the template with proper tags:
-
-{self.action_node._concrete_ex}\
-
---------------------------------
-
-{self.and_node._concrete_ex}\
-
---------------------------------
-
-{self.or_node._concrete_ex}\
+{self.action_node._concrete_ex}
+{self.and_node._concrete_ex}
+{self.or_node._concrete_ex}
 """
             )
 
@@ -612,23 +622,15 @@ Make sure to follow the template with proper tags:
 
     def _parse_answer(self, text_answer):
         ans_dict = {}
-        try:
+
+        tmp = parse_html_tags_raise(text_answer, keys=["node_type"])
+        if "node_type" in tmp and tmp["node_type"] == "ACTION":
             ans_dict = self.action_node.parse_answer(text_answer)
-            return ans_dict
-        except Exception as e:
-            ex = e
-
-        try:
+        elif "node_type" in tmp and tmp["node_type"] == "AND":
             ans_dict = self.and_node.parse_answer(text_answer)
-            return ans_dict
-        except Exception as e:
-            ex = e
-
-        try:
+        elif "node_type" in tmp and tmp["node_type"] == "OR":
             ans_dict = self.or_node.parse_answer(text_answer)
-            return ans_dict
-        except Exception as e:
-            ex = e
+        else:
+            raise ParseError("Invalid node type")
 
-        if ex:
-            raise ex
+        return ans_dict

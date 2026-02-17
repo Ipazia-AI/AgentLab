@@ -60,25 +60,20 @@ class MainPrompt(dp.Shrinkable):
         actions: list[str],
         memories: list[str],
         thoughts: list[str],
-        previous_plan: str,
-        step: int,
+        current_plan_step: str,
+        completed_plan_steps: list[str],
+        future_plan_steps: list[str],
         flags: GenericPromptFlags,
     ) -> None:
         super().__init__()
         self.flags = flags
+        self.current_plan_step = current_plan_step
+        self.completed_plan_steps = completed_plan_steps
+        self.future_plan_steps = future_plan_steps
         self.history = dp.History(obs_history, actions, memories, thoughts, flags.obs)
-        if self.flags.enable_chat:
-            self.instructions = dp.ChatInstructions(
-                obs_history[-1]["chat_messages"], extra_instructions=flags.extra_instructions
-            )
-        else:
-            if sum([msg["role"] == "user" for msg in obs_history[-1].get("chat_messages", [])]) > 1:
-                logging.warning(
-                    "Agent is in goal mode, but multiple user messages are present in the chat. Consider switching to `enable_chat=True`."
-                )
-            self.instructions = dp.GoalInstructions(
-                obs_history[-1]["goal_object"], extra_instructions=flags.extra_instructions
-            )
+        self.instructions = dp.GoalInstructions(
+            obs_history[-1]["goal_object"], extra_instructions=flags.extra_instructions
+        )
 
         self.obs = dp.Observation(
             obs_history[-1],
@@ -96,13 +91,14 @@ class MainPrompt(dp.Shrinkable):
         self.be_cautious = dp.BeCautious(visible=time_for_caution)
         self.think = dp.Think(visible=lambda: flags.use_thinking)
         self.hints = dp.Hints(visible=lambda: flags.use_hints)
-        self.plan = Plan(previous_plan, step, lambda: flags.use_plan)  # TODO add previous plan
         self.criticise = Criticise(visible=lambda: flags.use_criticise)
         self.memory = Memory(visible=lambda: flags.use_memory)
 
     @property
     def _prompt(self) -> HumanMessage:
         prompt = HumanMessage(self.instructions.prompt)
+        future_plan_steps = "\n".join(self.future_plan_steps)
+        completed_plan_steps = "\n".join(self.completed_plan_steps)
         prompt.add_text(
             f"""\
 {self.obs.prompt}\
@@ -111,9 +107,17 @@ class MainPrompt(dp.Shrinkable):
 {self.hints.prompt}\
 {self.be_cautious.prompt}\
 {self.think.prompt}\
-{self.plan.prompt}\
 {self.memory.prompt}\
 {self.criticise.prompt}\
+
+# Yet to be executed plan steps:
+{future_plan_steps}
+
+# Already executed plan steps:
+{completed_plan_steps}
+
+# Current Plan Step:
+{self.current_plan_step}
 """
         )
 
@@ -126,7 +130,6 @@ Here is an abstract version of the answer with description of the content of
 each tag. Make sure you follow this structure, but replace the content with your
 answer:
 {self.think.abstract_ex}\
-{self.plan.abstract_ex}\
 {self.memory.abstract_ex}\
 {self.criticise.abstract_ex}\
 {self.action_prompt.abstract_ex}\
@@ -141,7 +144,6 @@ answer:
 Here is a concrete example of how to format your answer.
 Make sure to follow the template with proper tags:
 {self.think.concrete_ex}\
-{self.plan.concrete_ex}\
 {self.memory.concrete_ex}\
 {self.criticise.concrete_ex}\
 {self.action_prompt.concrete_ex}\
@@ -156,7 +158,6 @@ Make sure to follow the template with proper tags:
     def _parse_answer(self, text_answer):
         ans_dict = {}
         ans_dict.update(self.think.parse_answer(text_answer))
-        ans_dict.update(self.plan.parse_answer(text_answer))
         ans_dict.update(self.memory.parse_answer(text_answer))
         ans_dict.update(self.criticise.parse_answer(text_answer))
         ans_dict.update(self.action_prompt.parse_answer(text_answer))
