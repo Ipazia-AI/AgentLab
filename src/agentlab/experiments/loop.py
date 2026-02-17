@@ -417,6 +417,7 @@ class ExpArgs:
             agent = self.agent_args.make_agent()
             if hasattr(agent, "set_task_name"):
                 agent.set_task_name(self.env_args.task_name)
+            print(f"\n Currently Running task: {self.env_args.task_name}\n") 
 
             logger.debug("Agent created.")
 

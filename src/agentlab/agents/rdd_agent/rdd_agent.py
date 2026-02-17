@@ -3,183 +3,109 @@ RDD Agent Integration for WorkArena Tasks
 
 Simple integration that uses GenericAgent's built-in plan field.
 
-This version can take either:
-  - a natural-language `task` description, or
-  - a BrowserGym task_name like 'workarena.servicenow.*'
-and will resolve BrowserGym task_names to their goal text via a
-one-step env reset before planning.
-
-IMPORTANT: RDD planning happens LAZILY when set_task_name() is called,
-not during make_agent(). This allows the experiment loop to set the task
-before planning occurs.
+IMPORTANT: RDD planning happens LAZILY on the first get_action() call,
+using the actual observation from the environment. This ensures:
+  - Exact same seed/task_kwargs as the experiment
+  - No redundant environment creation
+  - Planning with real initial state
 """
 
 from dataclasses import dataclass
-from typing import Any
 
-import gymnasium as gym
-
-from agentlab.agents import dynamic_prompting as dp
 from agentlab.agents.generic_agent.agent_configs import GenericAgentArgs
 from agentlab.agents.generic_agent.generic_agent import GenericAgent
 
-from .obs_utils import (extract_axtree_flat, extract_goal_text, extract_html,
-                        format_state_description)
+from .obs_utils import (
+    extract_axtree_flat,
+    extract_goal_text,
+    extract_html,
+    format_state_description,
+)
 from .plan_refiner import PlanRefiner, RefinerConfig
 from .rdd_planner import RDDConfig, SimplifiedRDDPlanner
 
 
-def _lazy_register_browsergym_task(task_name: str) -> None:
-    """Register BrowserGym tasks via lazy imports (mirrors AgentLab behavior)."""
-    if task_name.startswith("miniwob"):
-        import browsergym.miniwob  # noqa: F401
-    elif task_name.startswith("workarena"):
-        import browsergym.workarena  # noqa: F401
-    elif task_name.startswith("webarena"):
-        import browsergym.webarena  # noqa: F401
-        import browsergym.webarenalite  # noqa: F401
-        try:
-            import browsergym.webarena_verified  # noqa: F401
-        except ImportError:
-            pass
-    elif task_name.startswith("visualwebarena"):
-        import browsergym.visualwebarena  # noqa: F401
-    elif task_name.startswith("assistantbench"):
-        import browsergym.assistantbench  # noqa: F401
-    elif task_name.startswith("weblinx"):
-        import weblinx_browsergym  # noqa: F401
-
-
-# Utility functions moved to obs_utils.py module
-# Use: from obs_utils import extract_goal_text, extract_axtree_flat, format_state_description
-
-
-@dataclass
-class RDDAgentArgs(GenericAgentArgs):
+class RDDAgent(GenericAgent):
     """
-    Agent args that creates agent with RDD planner.
-
-    The `task` field can be either:
-      - a natural-language description, OR
-      - a BrowserGym task name like 'workarena.servicenow.*'
-    In the latter case we will look up the environment, reset it,
-    and use the goal text from the observation as the planning task.
+    RDD Agent that performs lazy planning on first observation.
     
-    IMPORTANT: Planning happens lazily when set_task_name() is called,
-    not during make_agent(). This allows the experiment loop to work correctly.
+    This ensures planning uses the exact same seed/task/state as the experiment.
     """
-
-    task: str | None = None  # natural-language task or BrowserGym task_name
-    initial_state: str = ""  # Auto-extracted from observation when available
-    use_axtree: bool = True  # Whether to extract and use AXTree for planning
-    use_html: bool = False    # Whether to extract and use HTML for planning
-    use_plan_refiner: bool = True  # Whether to refine the plan after generation
-    refiner_iterations: int = 2  # Number of refinement iterations
-
-    def _resolve_planning_context(self) -> tuple[str, str | None, str | None, str]:
-        """
-        Convert self.task into planning context (goal text + optional axtree + optional html + state).
+    
+    def __init__(
+        self,
+        chat_model_args,
+        flags,
+        max_retry=4,
+        use_axtree=True,
+        use_html=False,
+        use_plan_refiner=True,
+        refiner_iterations=2,
+    ):
+        super().__init__(chat_model_args, flags, max_retry)
         
-        Returns:
-            Tuple of (goal_text, axtree_flat, html, state_description)
-        """
-        if not self.task:
-            raise ValueError("RDDAgentArgs.task must be set.")
-
-        # If it looks like a BrowserGym task_name, fetch its goal text.
-        if any(
-            self.task.startswith(prefix)
-            for prefix in (
-                "workarena.",
-                "miniwob.",
-                "webarena.",
-                "visualwebarena.",
-                "assistantbench.",
-                "weblinx.",
-            )
-        ):
-            task_name = self.task
-            _lazy_register_browsergym_task(task_name)
-
-            env_id = f"browsergym/{task_name}"
-            env = gym.make(
-                env_id,
-                disable_env_checker=True,
-                max_episode_steps=1,
-                headless=True,
-                use_raw_page_output=False,  # Changed to False to get axtree_object
-            )
-            try:
-                obs, _info = env.reset(seed=0)
-            finally:
-                env.close()
-
-            # Extract goal text
-            goal_text = extract_goal_text(obs)
-            if not goal_text:
-                print(
-                    f"Warning: could not extract goal text from env '{env_id}'. "
-                    "Falling back to task_name as description."
-                )
-                goal_text = task_name
+        # Store RDD-specific config
+        self._rdd_config = {
+            'chat_model_args': chat_model_args,
+            'use_axtree': use_axtree,
+            'use_html': use_html,
+            'use_plan_refiner': use_plan_refiner,
+            'refiner_iterations': refiner_iterations,
+        }
+        self._plan_generated = False
+    
+    def get_action(self, obs):
+        """Override to do lazy planning on first call."""
+        # Generate plan on first observation if planning is enabled
+        if not self._plan_generated and self.flags.use_plan:
+            self._generate_plan_from_obs(obs)
+            self._plan_generated = True
+        
+        # Call parent get_action
+        return super().get_action(obs)
+    
+    def _generate_plan_from_obs(self, obs):
+        """Generate RDD plan from the actual observation."""
+        print("\n🧠 Generating RDD plan from initial observation...")
+        
+        # Extract planning context from observation
+        goal_text = extract_goal_text(obs)
+        if not goal_text:
+            print("⚠ Warning: Could not extract goal text from observation")
+            goal_text = "Complete the task"
+        
+        state_desc = format_state_description(obs)
+        
+        # Extract AXTree if requested
+        axtree_flat = None
+        if self._rdd_config['use_axtree']:
+            axtree_flat = extract_axtree_flat(obs)
+            if axtree_flat:
+                print(f"✓ Extracted AXTree: {len(axtree_flat)} characters")
             else:
-                print(f"Resolved BrowserGym task '{task_name}' to goal:\n  {goal_text}\n")
-            
-            # Extract AXTree if requested
-            axtree_flat = None
-            if self.use_axtree:
-                axtree_flat = extract_axtree_flat(obs)
-                if axtree_flat:
-                    print(f"✓ Extracted AXTree: {len(axtree_flat)} characters")
-                else:
-                    print("⚠ No AXTree found in observation")
-            
-            # Extract HTML if requested
-            html = None
-            if self.use_html:
-                html = extract_html(obs)
-                if html:
-                    print(f"✓ Extracted HTML: {len(html)} characters")
-                else:
-                    print("⚠ No HTML found in observation")
-            
-            print()  # Empty line for readability
-            
-            # Extract state description from observation
-            state_desc = format_state_description(obs)
-            
-            return goal_text, axtree_flat, html, state_desc
-
-        # Already a natural-language task - no AXTree, HTML, or obs available
-        return self.task, None, None, self.initial_state
-    
-    def _generate_plan(self, action_set) -> str:
-        """
-        Generate and optionally refine an RDD plan.
+                print("⚠ No AXTree found in observation")
         
-        Args:
-            action_set: Action set to initialize the planner with
+        # Extract HTML if requested
+        html = None
+        if self._rdd_config['use_html']:
+            html = extract_html(obs)
+            if html:
+                print(f"✓ Extracted HTML: {len(html)} characters")
+            else:
+                print("⚠ No HTML found in observation")
         
-        Returns:
-            The final plan string (refined if use_plan_refiner is enabled)
-        """
-        print(f"\n🧠 Generating RDD plan for task: {self.task}")
-        
-        # Resolve task into planning context (goal + axtree + html + state)
-        planning_task, axtree_flat, html, state_desc = self._resolve_planning_context()
-        
-        # Initialize planner with LLM, config, and action_set
+        # Initialize planner
         planner_config = RDDConfig(max_depth=2, max_nodes=20)
-        llm = self.chat_model_args.make_model()
-        planner = SimplifiedRDDPlanner(llm, planner_config, action_set)
+        llm = self._rdd_config['chat_model_args'].make_model()
+        planner = SimplifiedRDDPlanner(llm, planner_config, self.action_set)
         
         # Generate initial plan
-        print(f"Task: {planning_task}")
+        print(f"Task: {goal_text}")
         if state_desc:
             print(f"State: {state_desc}")
         
         result = planner.plan(
-            task=planning_task,
+            task=goal_text,
             state=state_desc,
             axtree=axtree_flat,
             html=html,
@@ -189,19 +115,19 @@ class RDDAgentArgs(GenericAgentArgs):
         print(f"✅ Plan generated with {len(result['graph']['nodes'])} subtasks")
         
         # Refine plan if enabled
-        if self.use_plan_refiner:
+        if self._rdd_config['use_plan_refiner']:
             print("\n" + "="*80)
             print("BEFORE REFINEMENT:")
             print("="*80)
             print(initial_plan)
             print("="*80 + "\n")
             
-            refiner_config = RefinerConfig(max_iterations=self.refiner_iterations)
+            refiner_config = RefinerConfig(max_iterations=self._rdd_config['refiner_iterations'])
             refiner = PlanRefiner(llm, refiner_config)
             
             refinement_result = refiner.refine(
                 plan=initial_plan,
-                task=planning_task,
+                task=goal_text,
             )
             
             final_plan = refinement_result["refined_plan"]
@@ -214,45 +140,59 @@ class RDDAgentArgs(GenericAgentArgs):
             
             # Show refinement summary
             if refinement_result["improvement_notes"]:
-                print(f"🔧 Improvements:")
+                print("🔧 Improvements:")
                 for note in refinement_result["improvement_notes"]:
                     print(f"   • {note}")
                 print()
             
-            # Store planning data to JSON (temporary - will be removed later)
-            action_set_list = [list(action_set.action_set)] if hasattr(action_set, 'action_set') else [list(action_set)]
-            store_planning_data_to_json(
-                plan_before_refinement=initial_plan,
-                plan_after_refinement=final_plan,
-                task_name=self.task,
-                action_set_at_steps=action_set_list
-            )
+            # Store planning data to JSON
+            # action_set_list = [list(self.action_set.action_set)] if hasattr(self.action_set, 'action_set') else [list(self.action_set)]
+            # store_planning_data_to_json(
+            #     plan_before_refinement=initial_plan,
+            #     plan_after_refinement=final_plan,
+            #     task_name=goal_text,
+            #     action_set_at_steps=action_set_list
+            # )
             
-            return final_plan
-        
-        return initial_plan
+            self.plan = final_plan
+        else:
+            self.plan = initial_plan
 
+
+@dataclass
+class RDDAgentArgs(GenericAgentArgs):
+    """
+    Agent args that creates RDDAgent with lazy planning.
+    
+    Planning happens on the first observation, ensuring exact same
+    seed/task/state as the experiment.
+    """
+
+    use_axtree: bool = True  # Whether to extract and use AXTree for planning
+    use_html: bool = False    # Whether to extract and use HTML for planning
+    use_plan_refiner: bool = True  # Whether to refine the plan after generation
+    refiner_iterations: int = 2  # Number of refinement iterations
+    
     def make_agent(self):
         """
-        Create agent with RDD plan.
+        Create RDDAgent with lazy planning.
         
-        The task must be set before calling this method.
+        Planning will happen on the first get_action() call using the real observation.
         """
-        # Create regular GenericAgent
-        agent = GenericAgent(
+        agent = RDDAgent(
             chat_model_args=self.chat_model_args,
             flags=self.flags,
             max_retry=self.max_retry,
+            use_axtree=self.use_axtree,
+            use_html=self.use_html,
+            use_plan_refiner=self.use_plan_refiner,
+            refiner_iterations=self.refiner_iterations,
         )
         
-        # Generate and store plan if task is set AND planning is enabled
-        if self.task and self.flags.use_plan:
-            # Pass the agent's action_set to the planner
-            agent.plan = self._generate_plan(action_set=agent.action_set)
-        elif self.task and not self.flags.use_plan:
-            print("⚠ Planning disabled (use_plan=False), skipping RDD planning\n")
+        if self.flags.use_plan:
+            print("✓ RDD Agent created - planning will happen on first observation\n")
         else:
-            print("⚠ Warning: No task set, skipping RDD planning\n")
+            print("⚠ Planning disabled (use_plan=False)\n")
         
         return agent
 
@@ -295,7 +235,7 @@ def store_planning_data_to_json(
     }
     
     # Create filename from task name
-    safe_task_name = task_name.replace(".", "_").replace("/", "_")
+    safe_task_name = task_name.replace(".", "_").replace("/", "_").replace(" ", "_")
     json_file = output_path / f"{safe_task_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
     
     # Load existing data if file exists, otherwise create new array
@@ -316,5 +256,4 @@ def store_planning_data_to_json(
     return str(json_file)
 
 
-__all__ = ["RDDAgentArgs", "store_planning_data_to_json"]
-__all__ = ["RDDAgentArgs", "store_planning_data_to_json"]
+__all__ = ["RDDAgent", "RDDAgentArgs", "store_planning_data_to_json"]

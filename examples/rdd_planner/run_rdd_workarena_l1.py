@@ -55,7 +55,7 @@ if __name__ == "__main__":
     benchmark = bgym.DEFAULT_BENCHMARKS[benchmark_name](n_repeats=10)
 
 # Specifically target a simple task for testing
-    benchmark = benchmark.subset_from_regexp("task_name", "workarena.servicenow.create-problem")
+    benchmark = benchmark.subset_from_regexp("task_name", "workarena.servicenow.create-problem|workarena.servicenow.order-loaner-laptop|workarena.servicenow.sort-asset-list")
 
     # Create study
     study = make_study(
@@ -63,23 +63,17 @@ if __name__ == "__main__":
         benchmark=benchmark
     )
     
-    # Limit to selected task by index
     print(f"Total tasks available: {len(study.exp_args_list)}")
     
-    # if TASK_INDEX >= len(study.exp_args_list):
-    #     print(f"❌ Error: Task index {TASK_INDEX} out of range (0-{len(study.exp_args_list)-1})")
-    #     sys.exit(1)
-    
-    # study.exp_args_list = [study.exp_args_list[TASK_INDEX]]
-    # print(f"Running task at index {TASK_INDEX}\n")
-    
-    # NOW set task for the experiments that will actually run
+    # Set headless mode for all experiments
     for i, exp_args in enumerate(study.exp_args_list, 1):
         exp_args.env_args.headless = HEADLESS
-        exp_args.agent_args.task = exp_args.env_args.task_name
         print(f"  Task {i}: {exp_args.env_args.task_name}")
+    
     print("\n▶️  Running experiments...\n")
+    print("Note: RDD planning will happen lazily on first observation for each task\n")
     study.run(n_jobs=1, parallel_backend="sequential")
+    # study.run(n_jobs=4)
     
     # Results
     results, summary, errors = study.get_results()
