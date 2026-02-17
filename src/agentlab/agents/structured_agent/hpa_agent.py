@@ -92,7 +92,7 @@ class HPAAgent(GenericAgent):
 
         if self.pending_action_node is not None and isinstance(obs, dict):
             # To be adjusted to the right observation key depending on how we manage the success result
-            self.hpa.complete_pending(self.obs_history)
+            self.hpa.complete_pending(self.chat_model_args.model_name, self.obs_history)
             self.pending_action_node = None
 
         self._infer_insight()

@@ -43,6 +43,11 @@ class Node(BaseModel):
     revision_count: int = 0
     execution_count: int = 0
 
+    @property
+    def depth(self) -> int:
+        """Return the depth of this node in the tree (root = 0)."""
+        return self.id.count(".")
+
     def add_child(self, child: "Node"):
         child.id = self.id + f".{len(self.children)+1}"
         self.children.append(child)

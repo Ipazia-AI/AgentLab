@@ -1,10 +1,18 @@
+import json
 import logging
 from typing import List, Tuple
 
 from bgym import AbstractActionSet
 
+from agentlab.agents import dynamic_prompting as dp
 from agentlab.agents.structured_agent.hpa_prompt import HPAPromptFlags
-from agentlab.llm.llm_utils import ParseError
+from agentlab.llm.llm_utils import (
+    Discussion,
+    HumanMessage,
+    ParseError,
+    SystemMessage,
+    retry,
+)
 
 from .andor_tree import Node, NodeState, NodeStatus, NodeType
 from .prompts import GlobalTreeUpdatePrompt
@@ -18,11 +26,14 @@ class HPA:
         flags: HPAPromptFlags,
         budget: int = 1000,
         max_revision_count: int = 3,
+        max_depth: int = 3,
     ):
         self.chat_llm = chat_llm
         self.action_set = action_set
+        self.flags = flags
         self.budget = budget  # remove
         self.max_revision_count = max_revision_count
+        self.max_depth = max_depth
         self.stack: List[Tuple[Node, NodeState]] = []
         self.task_constraints: list[str] = []
         self.task_progress_summary: str | None = None
@@ -75,7 +86,7 @@ class HPA:
 
         return None
 
-    def complete_pending(self, obs_history: list[dict]):
+    def complete_pending(self, model_name: str, obs_history: list[dict]):
         action_error = obs_history[-1].get("last_action_error", "")
         success = True if action_error == "" else False
         if success:
@@ -84,7 +95,12 @@ class HPA:
             self.pending_node.status = NodeStatus.FAIL
             self.pending_node.action_error = action_error
 
-        # self._global_tree_update()
+        self._global_tree_update(
+            model_name=model_name,
+            task_description=self.goal,
+            task_constraints=self.task_constraints,
+            obs_history=obs_history,
+        )
 
     # Algo 2 from the HPA paper
     def _process_node_entering(self, node: Node, expansion_function) -> Node:
@@ -196,8 +212,28 @@ class HPA:
                     node.status = NodeStatus.PRUNED
                     self._propagate_failure(node)
 
-    def _apply_expansion(self, node: Node, expansion: dict):
+    def _apply_expansion(self, node: Node, expansion: dict) -> NodeType:
         node_type = str(expansion.get("node_type", "")).upper().strip()
+
+        # Safety net: if the node is at max depth, override any AND/OR to ACTION.
+        if node.depth >= self.max_depth and node_type in {"AND", "OR"}:
+            logging.warning(
+                "Node %s at depth %d reached max_depth=%d but LLM returned %s. "
+                "Forcing ACTION from the first child description.",
+                node.id,
+                node.depth,
+                self.max_depth,
+                node_type,
+            )
+            children = expansion.get("expansion", [])
+            # Best-effort: use the first child description as the action text.
+            fallback = children[0] if isinstance(children, list) and children else "noop"
+            raise ParseError(
+                f"Maximum tree depth ({self.max_depth}) reached. "
+                f"You MUST return an ACTION node with a single atomic browser action, "
+                f"not a {node_type} node. The goal to achieve in a single action: {fallback}"
+            )
+
         if node_type == "ACTION":
             node.type = NodeType.ACTION
             return
@@ -263,19 +299,119 @@ class HPA:
     def _set_context(self, node: Node):
         pass
 
+    def _get_global_tree(self) -> list[Node]:
+        """
+        Returns the global tree as a list of nodes.
+
+        Args:
+            None
+
+        Returns:
+            List[Node]: List of nodes in the global tree.
+        """
+        if not getattr(self, "root_node", None):
+            return []
+
+        def walk_tree(node: Node, nodes_list: list[Node]):
+            if node.status == NodeStatus.DELETED:
+                return
+            nodes_list.append(node)
+            for child in node.children:
+                walk_tree(child, nodes_list)
+            return nodes_list
+
+        global_tree = walk_tree(self.stack[0][0], [])
+        return global_tree
+
+    def _get_nodes_from_ids(self, node_ids: list[str], global_tree: list[Node]) -> List[Node]:
+        """
+        Returns the nodes from the global tree that have specified ids.
+
+        Args:
+            node_ids: list of node ids to get from the global tree.
+            global_tree: list of nodes in the global tree.
+
+        Returns:
+            List[Node]: List of nodes from the global tree that have specified ids.
+        """
+        return [node for node in global_tree if node.id in node_ids]
+
+    def _prune_nodes_from_global_tree(
+        self, pruned_node_ids: list[str], global_tree: list[Node]
+    ) -> None:
+        """
+        Sets the status of the nodes with specified ids to PRUNED.
+
+        Args:
+            pruned_node_ids: list of node ids to prune from the global tree.
+            global_tree: list of nodes in the global tree.
+
+        Returns:
+            None
+        """
+        nodes_to_prune = self._get_nodes_from_ids(node_ids=pruned_node_ids, global_tree=global_tree)
+        for node in nodes_to_prune:
+            # node.status = NodeStatus.PRUNED
+            node.status = NodeStatus.DELETED
+        return
+
+    def _update_nodes_in_global_tree(
+        self, updated_node_ids: dict[str, str], global_tree: list[Node]
+    ) -> None:
+        """
+        Updates the description of the nodes with specified ids.
+
+        Args:
+            updated_node_ids: dictionary of node ids to update and their new descriptions.
+            global_tree: list of nodes in the global tree.
+
+        Returns:
+            None
+        """
+        nodes_to_update = self._get_nodes_from_ids(
+            node_ids=list(updated_node_ids.keys()), global_tree=global_tree
+        )
+        for node in nodes_to_update:
+            node.description = updated_node_ids[node.id]
+        return
+
     def _global_tree_update(
-        self, task_description: str, task_constraints: list[str], observation: str
-    ) -> None:  # TODO: Should return the updated global tree: a list of nodes ordered by their ids
-        system_message = GlobalTreeUpdatePrompt(self.action_set, self.action_flags).system_message()
+        self,
+        model_name: str,
+        task_description: str,
+        task_constraints: list[str],
+        obs_history: list[dict],
+    ) -> None:
+        """
+        Updates the global tree based on the task description, task constraints, observation and other information.
+
+        Args:
+            task_description: string containing the task description.
+            task_constraints: list of strings of the task constraints.
+            observation: axtree of the current webpage.
+
+        Returns:
+            None
+        """
+        global_tree = self._get_global_tree()
+        node = self.pending_node
+        global_tree_info = "\n\n".join(
+            [
+                f"NODE ID: {node.id}\nNODE TYPE: {node.type.name}\nNODE STATUS: {node.status.name}\nNODE DESCRIPTION: {node.description}\nNODE ACTION: {node.action}"
+                for node in global_tree
+            ]
+        )
+        system_message = GlobalTreeUpdatePrompt(self.action_set, self.flags.action).system_message()
         user_message = GlobalTreeUpdatePrompt.user_prompt(
             task_description=task_description,
+            node_id=self.pending_node.id,
             task_constraints=task_constraints or None,
             task_progress_summary=self.task_progress_summary,
             notes_summary=self.previous_notes,
-            observation=observation,
+            observation=obs_history[-1].get("axtree_txt", ""),
             global_tree_info=self.global_tree,  # TODO: Implement the global_tree attribute: a list of nodes ordered by their ids
         )
-        result = self._call_json_prompt(system_message, user_message)
+        result = self._call_json_prompt(model_name, system_message, user_message)
         pruned_nodes = result.get("prune", [])
         updated_nodes = result.get("update", {})
         # TODO: prune and update the nodes in the global_tree
@@ -339,13 +475,17 @@ class HPA:
         return {NodeStatus.SUCCESS, NodeStatus.DELETED, NodeStatus.PRUNED}
 
     def _has_successful_children_and(self, node: Node) -> bool:
-        return all(c.status == NodeStatus.SUCCESS for c in node.children)
+        # return all(c.status == NodeStatus.SUCCESS for c in node.children)
+        return all(
+            c.status == NodeStatus.SUCCESS or c.status == NodeStatus.DELETED for c in node.children
+        )
 
     def _has_successful_children_or(self, node: Node) -> bool:
         return any(c.status == NodeStatus.SUCCESS for c in node.children)
 
     def _has_valid_children_and(self, node: Node) -> bool:
-        return all(c.status not in {NodeStatus.PRUNED, NodeStatus.DELETED} for c in node.children)
+        # return all(c.status not in {NodeStatus.PRUNED, NodeStatus.DELETED} for c in node.children)
+        return all(c.status not in {NodeStatus.PRUNED} for c in node.children)
 
     def _has_valid_children_or(self, node: Node) -> bool:
         return any(c.status not in {NodeStatus.PRUNED, NodeStatus.DELETED} for c in node.children)
@@ -361,6 +501,35 @@ class HPA:
 
     def _is_root(self, node: Node) -> bool:
         return node.parent is None
+
+    def _call_json_prompt(
+        self, model_name: str, system_message: str, user_message: str | dp.Shrinkable
+    ) -> dict:
+        if isinstance(user_message, dp.Shrinkable):
+            if self.flags.max_prompt_tokens is not None:
+                user_message = dp.fit_tokens(
+                    shrinkable=user_message,
+                    max_prompt_tokens=self.flags.max_prompt_tokens,
+                    model_name=model_name,
+                    max_iterations=self.flags.max_trunc_itr,
+                    additional_prompts=system_message,
+                )
+            else:
+                user_message = user_message.prompt
+        messages = Discussion([SystemMessage(system_message), HumanMessage(user_message)])
+
+        def parser(text_answer: str) -> dict:
+            candidate = text_answer.strip()
+            start = candidate.find("{")
+            end = candidate.rfind("}")
+            if start != -1 and end != -1 and end > start:
+                candidate = candidate[start : end + 1]
+            try:
+                return json.loads(candidate)
+            except json.JSONDecodeError as exc:
+                raise ParseError(f"Return valid JSON only. Error: {exc}") from exc
+
+        return retry(self.chat_llm, messages, n_retry=2, parser=parser)
 
 
 def main():

@@ -70,13 +70,13 @@ class GlobalTreeUpdatePrompt:
 
     def system_message(self) -> str:
         return f"""\
-You are a global logical (AND/OR) tree update agent revising an existing logical planning tree for a web-browsing task based on current available information so that the task is executed more efficiently. 
-Do not change the ordering of the sub-plans.
+You are an agent that operates as the global manager of a logical (AND/OR) tree that represents the execution plan for a web-browsing task.
+Your job is to manage the tree by changing the nodes based on the current available information so that the task is executed more efficiently.
 
 Possible Node Types:
-- AND Node: Represents an ordered list of logical subgoals required to achieve the node’s objective.
-- OR Node: Represents alternative sub-strategies (which can be other AND/OR nodes).
-- ACTION Node: Single executable action strictly matching one element of the list of browser actions described below.
+- AND Node: Represents an ordered list of logical subgoals required to achieve the node’s objective. The children of an AND node are executed in the order they are listed. To be completed, all children must be completed successfully.
+- OR Node: Represents alternative sub-strategies (which can be other AND/OR nodes). The children of an OR node represent different ways to achieve the node's objective. To be completed, at least one child must be completed successfully.
+- ACTION Node: Single executable action strictly matching one element of the list of browser actions described below. The action node is a leaf node that represents a single action to be executed on the webpage.
 
 Node status indicators:
 - VISITED: for visited nodes
@@ -85,45 +85,35 @@ Node status indicators:
 - SUCCESS: for completed nodes 
 - FAIL: for temporarily failed nodes
 
+This is the list of browser actions that can be performed on the webpage:
 {self.action_prompt}
 
 You are provided: 
-- The root-level task description 
-- Current AND/OR tree description 
-- The accessibility tree structure of the current webpage as the observation 
-- Notes summary: Summary of notes taken by the agent during the task
+- The overall goal of the task
+- The Current tree status. For each node, you are provided with the node id, node type, node description, node status and the node action.
+- The id of the node which action was executed as last on the webpage. 
+- The accessibility tree structure of the current webpage as the observation after the action was executed.
+- The overall task progress summary so far.
+- A summary of notes taken by the agent so far.
 
-Your task is to carefully analyze all the information provided and determine which nodes to prune and which nodes to update.
-Apply changes in this strict order:
-1. PRUNE nodes that are no longer relevant or are duplicates. 
-2. UPDATE node descriptions if intent is unchanged but content needs minor revision.
+----------------------------------
+Your task is to carefully analyze all the information provided and manipulate the tree to determine which nodes to prune.
+This refinement operation serves to reduce the tree complexity by removing unpromising branches, avoid redundancies in the tasks and improve the overall task execution efficiency.
+PRUNE nodes that are no longer relevant or are duplicates. A node is considered duplicate if it has the same objective as another node in the tree. A node is irrelevant if it is no more necessary to achieve the overall task.
 
 Important Rules: 
-- You are only allowed to PRUNE or UPDATE nodes that have not been deleted, or pruned, or marked succesful. 
-- Do not add status of the node while updating the description. 
-- Only use existing node IDs from the current tree; do not create new node IDs or subtrees. 
-- Do NOT PRUNE children that are necessary for satisfying the parent node’s objective. 
-- Do not change node types. 
-- Do not change the ordering of the sub-plans.
-- Updating or pruning is not always necessary. Just fill the fields with empty lists or dictionaries if no changes are needed.
+- You are only allowed to PRUNE nodes which status is not DELETED, PRUNED, or SUCCESS. 
+- Only use existing node IDs from the current tree; do not create new node IDs or subtrees.
+- Pruning is not always necessary. Just fill the fields with empty lists or dictionaries if no changes are needed. Be precise in the changes you make, delete only nodes that do not lead to any further progress in the task.
 
-First reason about the update to the tree based on the information given to you (task description, task constraints, task progress summary, notes summary, current AND/OR tree description, observation) and then give your answer in the following format. 
-Use the AND/OR tree description to ensure that you are not repeating any subgoals that have already been considered. 
-Format your output as JSON.
+Provide your answer in the following JSON format:
 
-Formatting Instructions:
 {{
   "prune": [
     "node_id of the first node to prune",
 	"node_id of the second node to prune",
 	"node_id of the third node to prune"
-  ],
-
-  "update": {
-	"node_id of the first node to update": "Describe here the node’s new objective (subgoal/strategy/description of action)",
-	"node_id of the second node to update": "Describe here the node’s new objective (subgoal/strategy/description of action)",
-	"node_id of the third node to update": "Describe here the node’s new objective (subgoal/strategy/description of action)"
-  }
+  ]
 }}
 
 Example:
@@ -131,18 +121,14 @@ Example:
   "prune": [
 	"1.2",
 	"1.3"
-  ],
-
-  "update": {
-	"0.1.2": "type eggless cake in search bar",
-	"0.2": "Find an eggless cake recipe with over 60 votes and at least 4.5 star rating by examining search results"
-  }
+  ]
 }}
 """
 
     @staticmethod
     def user_prompt(
         task_description: str,
+        node_id: str,
         task_constraints: str | list[str] | None,
         notes_summary: str | None,
         observation: str,
@@ -150,7 +136,8 @@ Example:
     ) -> dp.Shrinkable:
         return _ShrinkableUserMessage(
             [
-                ("ROOT-LEVEL TASK DESCRIPTION", task_description),
+                ("OVERALL GOAL OF THE TASK", task_description),
+                ("CURRENT NODE ID", node_id),
                 ("TASK CONSTRAINTS", task_constraints),
                 ("NOTES SUMMARY", _TextTrunkater(notes_summary, start_trunkate_iteration=4)),
                 ("OBSERVATION", _TextTrunkater(observation, start_trunkate_iteration=2)),
