@@ -13,17 +13,27 @@ from agentlab.agents.generic_agent.generic_agent import GenericAgentArgs
 from agentlab.agents.structured_agent.hpa_agent import HPAAgentArgs
 from agentlab.agents.structured_agent.hpa_prompt import HPAPromptFlags
 from agentlab.experiments.study import Study
+from agentlab.llm.chat_api import OpenRouterModelArgs
 
 # Load environment variables for WorkArena (e.g., ServiceNow credentials/instance).
 project_dir = Path(__file__).parents[2]
 load_dotenv(project_dir.joinpath(".env"), override=False)
 
-agent_args = AGENT_4o_MINI
+agent_args = AGENT_GPT5_MINI
 agent_args.flags.use_plan = True
+chat_model_args = agent_args.chat_model_args
 # agent_args.chat_model_args.temperature = 0.0
 
+# chat_model_args = OpenRouterModelArgs(
+#     model_name="google/gemini-3-flash-preview",
+#     max_total_tokens=1_050_000,
+#     max_input_tokens=1_050_000 - 65_536,
+#     max_new_tokens=65_536,
+#     temperature=0.1,
+# )
+
 agent_config = HPAAgentArgs(
-    chat_model_args=agent_args.chat_model_args,
+    chat_model_args=chat_model_args,
     flags=HPAPromptFlags(
         action=agent_args.flags.action,
         obs=agent_args.flags.obs,
@@ -54,6 +64,7 @@ agent_config.flags.action = dp.ActionFlags(
     long_description=False,
     individual_examples=False,
 )
+agent_config.set_reproducibility_mode()
 
 agent_configs = [agent_config]
 benchmark = DEFAULT_BENCHMARKS["workarena_l1"]()
@@ -61,18 +72,18 @@ benchmark = DEFAULT_BENCHMARKS["workarena_l1"]()
 # metadata = benchmark.task_metadata
 # tasks_workload = metadata[metadata["task_name"].str.match("workarena.servicenow.all-menu")]
 # tasks_list = tasks_workload["task_name"].tolist()
-benchmark = benchmark.subset_from_regexp("task_name", "workarena.servicenow.all-menu")
+# benchmark = benchmark.subset_from_regexp("task_name", "workarena.servicenow.all-menu")
 
 
 # Optionally filter tasks:
 # benchmark = benchmark.subset_from_glob(column="task_name", glob="*create*")
 
-n_jobs = 1  # keep 1 for debugging
+n_jobs = 10  # keep 1 for debugging
 
 if __name__ == "__main__":
     study = Study(agent_configs, benchmark)
     study.run(
         n_jobs=n_jobs,
-        parallel_backend="sequential",
+        parallel_backend="ray",
         n_relaunch=1,
     )

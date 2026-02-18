@@ -43,9 +43,9 @@ class HPA:
         self._counter: int = 0
 
     def get_plan(self) -> (list[str], list[str]):
-        completed_plan = [node.description for node in self.completed_nodes]
+        completed_plan = [node.prompt_description for node in self.completed_nodes]
         pending_plan = [
-            node.description
+            node.prompt_description
             for node, state in reversed(self.stack)
             if node.id != "0"
             and state != NodeState.EXITING
@@ -86,7 +86,14 @@ class HPA:
 
         return None
 
-    def complete_pending(self, model_name: str, obs_history: list[dict]):
+    def complete_pending(
+        self,
+        model_name: str,
+        constraints: str,
+        progress: str,
+        suggestion: str,
+        obs_history: list[dict],
+    ):
         action_error = obs_history[-1].get("last_action_error", "")
         success = True if action_error == "" else False
         if success:
@@ -98,7 +105,9 @@ class HPA:
         self._global_tree_update(
             model_name=model_name,
             task_description=self.goal,
-            task_constraints=self.task_constraints,
+            constraints=constraints,
+            progress=progress,
+            suggestion=suggestion,
             obs_history=obs_history,
         )
 
@@ -113,9 +122,7 @@ class HPA:
         node.execution_count += 1
 
         if node.type == NodeType.UNKNOWN:
-            expansion_function(
-                node.description, self.get_plan(), lambda x: self._apply_expansion(node, x)
-            )
+            expansion_function(node, self.get_plan())
             self.stack.append((node, NodeState.EXITING))
 
         if node.type == NodeType.ACTION:
@@ -212,54 +219,6 @@ class HPA:
                     node.status = NodeStatus.PRUNED
                     self._propagate_failure(node)
 
-    def _apply_expansion(self, node: Node, expansion: dict) -> NodeType:
-        node_type = str(expansion.get("node_type", "")).upper().strip()
-
-        # Safety net: if the node is at max depth, override any AND/OR to ACTION.
-        if node.depth >= self.max_depth and node_type in {"AND", "OR"}:
-            logging.warning(
-                "Node %s at depth %d reached max_depth=%d but LLM returned %s. "
-                "Forcing ACTION from the first child description.",
-                node.id,
-                node.depth,
-                self.max_depth,
-                node_type,
-            )
-            children = expansion.get("expansion", [])
-            # Best-effort: use the first child description as the action text.
-            fallback = children[0] if isinstance(children, list) and children else "noop"
-            raise ParseError(
-                f"Maximum tree depth ({self.max_depth}) reached. "
-                f"You MUST return an ACTION node with a single atomic browser action, "
-                f"not a {node_type} node. The goal to achieve in a single action: {fallback}"
-            )
-
-        if node_type == "ACTION":
-            node.type = NodeType.ACTION
-            return
-
-        if node_type not in {"AND", "OR"}:
-            raise ParseError("node_type must be ACTION, AND, or OR.")
-
-        node.type = NodeType.AND if node_type == "AND" else NodeType.OR
-
-        node.description = expansion.get("node_description", node.description)
-
-        children = expansion.get("node_expansion", [])
-        if not isinstance(children, list) or not children:
-            raise ParseError("AND/OR node requires a non-empty 'expansion' list.")
-
-        node.children = []
-        for child_text in children:
-            if not isinstance(child_text, str):
-                continue
-            score = None
-            clean_text = child_text.strip()
-            # if node_type == "OR":
-            #     score, clean_text = self._extract_score(clean_text)
-            child = Node(type=NodeType.UNKNOWN, description=clean_text, parent=node, score=score)
-            node.add_child(child)
-
     # def _extract_score(self, text: str) -> tuple[float | None, str]:
     #     if "(score:" not in text:
     #         return None, text
@@ -309,8 +268,8 @@ class HPA:
         Returns:
             List[Node]: List of nodes in the global tree.
         """
-        if not getattr(self, "root_node", None):
-            return []
+        # if not getattr(self, "root_node", None):
+        #     return []
 
         def walk_tree(node: Node, nodes_list: list[Node]):
             if node.status == NodeStatus.DELETED:
@@ -379,7 +338,9 @@ class HPA:
         self,
         model_name: str,
         task_description: str,
-        task_constraints: list[str],
+        constraints: str,
+        progress: str,
+        suggestion: str,
         obs_history: list[dict],
     ) -> None:
         """
@@ -394,7 +355,6 @@ class HPA:
             None
         """
         global_tree = self._get_global_tree()
-        node = self.pending_node
         global_tree_info = "\n\n".join(
             [
                 f"NODE ID: {node.id}\nNODE TYPE: {node.type.name}\nNODE STATUS: {node.status.name}\nNODE DESCRIPTION: {node.description}\nNODE ACTION: {node.action}"
@@ -405,16 +365,19 @@ class HPA:
         user_message = GlobalTreeUpdatePrompt.user_prompt(
             task_description=task_description,
             node_id=self.pending_node.id,
-            task_constraints=task_constraints or None,
-            task_progress_summary=self.task_progress_summary,
-            notes_summary=self.previous_notes,
+            constraints=constraints,
+            progress=progress,
+            suggestion=suggestion,
             observation=obs_history[-1].get("axtree_txt", ""),
-            global_tree_info=self.global_tree,  # TODO: Implement the global_tree attribute: a list of nodes ordered by their ids
+            global_tree_info=global_tree_info,
         )
         result = self._call_json_prompt(model_name, system_message, user_message)
-        pruned_nodes = result.get("prune", [])
-        updated_nodes = result.get("update", {})
-        # TODO: prune and update the nodes in the global_tree
+        pruned_node_ids = result.get("prune", [])
+        updated_node_ids = result.get("update", {})
+        self._prune_nodes_from_global_tree(pruned_node_ids=pruned_node_ids, global_tree=global_tree)
+        self._update_nodes_in_global_tree(
+            updated_node_ids=updated_node_ids, global_tree=global_tree
+        )
         return
 
     def _propagate_failure(self, node: Node):

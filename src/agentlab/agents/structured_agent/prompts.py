@@ -94,7 +94,7 @@ You are provided:
 - The id of the node which action was executed as last on the webpage. 
 - The accessibility tree structure of the current webpage as the observation after the action was executed.
 - The overall task progress summary so far.
-- A summary of notes taken by the agent so far.
+- A suggestion for the next action to take.
 
 ----------------------------------
 Your task is to carefully analyze all the information provided and manipulate the tree to determine which nodes to prune.
@@ -129,8 +129,9 @@ Example:
     def user_prompt(
         task_description: str,
         node_id: str,
-        task_constraints: str | list[str] | None,
-        notes_summary: str | None,
+        constraints: str,
+        progress: str,
+        suggestion: str,
         observation: str,
         global_tree_info: str,
     ) -> dp.Shrinkable:
@@ -138,8 +139,9 @@ Example:
             [
                 ("OVERALL GOAL OF THE TASK", task_description),
                 ("CURRENT NODE ID", node_id),
-                ("TASK CONSTRAINTS", task_constraints),
-                ("NOTES SUMMARY", _TextTrunkater(notes_summary, start_trunkate_iteration=4)),
+                ("TASK CONSTRAINTS", constraints),
+                ("TASK PROGRESS SUMMARY", _TextTrunkater(progress, start_trunkate_iteration=4)),
+                ("NEXT STEP SUGGESTION", _TextTrunkater(suggestion, start_trunkate_iteration=4)),
                 ("OBSERVATION", _TextTrunkater(observation, start_trunkate_iteration=2)),
                 (
                     "GLOBAL TREE INFORMATION",

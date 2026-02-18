@@ -54,3 +54,7 @@ class Node(BaseModel):
 
     def __str__(self) -> str:
         return f"Node(id={self.id}, type={self.type.name}, status={self.status.name}, description={self.description}, action={self.action}, action_error={self.action_error}, parent={self.parent.id if self.parent else None}, children={len(self.children)}, score={self.score or 'N/A'})"
+
+    @property
+    def prompt_description(self) -> str:
+        return f"{self.id}: {self.description}"

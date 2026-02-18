@@ -26,7 +26,7 @@ from agentlab.llm.llm_utils import (
 )
 from agentlab.llm.tracking import cost_tracker_decorator
 
-from .hpa import HPA
+from .hpa import HPA, Node
 
 
 @dataclass
@@ -74,12 +74,14 @@ class HPAAgent(GenericAgent):
         self.constraints = None
         self.progress = None
         self.suggestion = None
+        self.max_depth = 3
         self.hpa = HPA(
             chat_llm=self.chat_llm,
             action_set=self.action_set,
             flags=self.flags,
             budget=self.budget,
             max_revision_count=self.max_revision_count,
+            max_depth=self.max_depth,
         )
 
     @cost_tracker_decorator
@@ -92,7 +94,13 @@ class HPAAgent(GenericAgent):
 
         if self.pending_action_node is not None and isinstance(obs, dict):
             # To be adjusted to the right observation key depending on how we manage the success result
-            self.hpa.complete_pending(self.chat_model_args.model_name, self.obs_history)
+            self.hpa.complete_pending(
+                self.chat_model_args.model_name,
+                self.constraints,
+                self.progress,
+                self.suggestion,
+                self.obs_history,
+            )
             self.pending_action_node = None
 
         self._infer_insight()
@@ -132,9 +140,11 @@ class HPAAgent(GenericAgent):
         self.progress = ans_dict.get("progress", None)
         self.suggestion = ans_dict.get("suggestion", None)
 
-    def _infer_plan(self, node_info: str, actual_plan: (list[str], list[str]), apply_expansion):
-        ans_dict, chat_messages, stats = self._infer(
+    def _infer_plan(self, node: Node, actual_plan: (list[str], list[str])):
+        self.pending_action_node, chat_messages, stats = self._infer(
             PlanningPrompt(
+                node=node,
+                max_depth=self.max_depth,
                 obs_history=self.obs_history,
                 actions=self.actions,
                 memories=self.memories,
@@ -143,13 +153,10 @@ class HPAAgent(GenericAgent):
                 progress=self.progress,
                 suggestion=self.suggestion,
                 actual_plan=actual_plan,
-                node_info=node_info,
                 flags=self.flags,
             ),
             SystemMessage(SystemPlanningPrompt().prompt),
         )
-
-        self.pending_action_node = apply_expansion(ans_dict)
 
     def _infer_action(self) -> tuple[Discussion, dict]:
 

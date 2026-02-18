@@ -519,9 +519,13 @@ Each time you provide a plan it will be used as a guide for planning the next ac
 You should be very concise and to the point, you should not provide any additional information that is not related to the task."""
 
 
+import agentlab.agents.structured_agent.hpa as hpa
+
+
 class PlanningPrompt(dp.Shrinkable):
     def __init__(
         self,
+        node: hpa.Node,
         obs_history: list[dict],
         actions: list[str],
         memories: list[str],
@@ -529,13 +533,14 @@ class PlanningPrompt(dp.Shrinkable):
         constraints: str,
         progress: str,
         suggestion: str,
-        node_info: str,
         actual_plan: (list[str], list[str]),
+        max_depth: int,
         flags: HPAPromptFlags,
     ):
         super().__init__()
+        self.node = node
         self.flags = flags
-        self.node_info = node_info
+        self.max_depth = max_depth
         self.history = dp.History(obs_history, actions, memories, thoughts, flags.obs)
         self.instructions = PlanningInstructions(
             obs_history[-1]["goal_object"],
@@ -589,7 +594,7 @@ class PlanningPrompt(dp.Shrinkable):
 {self.hints.prompt}\
 
 # NODE TO EXPAND:
-{self.node_info}
+{self.node.prompt_description}
 """
         )
 
@@ -632,5 +637,54 @@ answer:
             ans_dict = self.or_node.parse_answer(text_answer)
         else:
             raise ParseError("Invalid node type")
+
+        node_type = str(ans_dict.get("node_type", "")).upper().strip()
+
+        # Safety net: if the node is at max depth, override any AND/OR to ACTION.
+        if self.node.depth >= self.max_depth and node_type in {"AND", "OR"}:
+            logging.warning(
+                "Node %s at depth %d reached max_depth=%d but LLM returned %s. "
+                "Forcing ACTION from the first child description.",
+                self.node.id,
+                self.node.depth,
+                self.max_depth,
+                node_type,
+            )
+            children = ans_dict.get("expansion", [])
+            # Best-effort: use the first child description as the action text.
+            fallback = children[0] if isinstance(children, list) and children else "noop"
+            raise ParseError(
+                f"Maximum tree depth ({self.max_depth}) reached. "
+                f"You MUST return an ACTION node with a single atomic browser action, "
+                f"not a {node_type} node. The goal to achieve in a single action: {fallback}"
+            )
+
+        if node_type == "ACTION":
+            self.node.type = hpa.NodeType.ACTION
+            return ans_dict
+
+        if node_type not in {"AND", "OR"}:
+            raise ParseError("node_type must be ACTION, AND, or OR.")
+
+        self.node.type = hpa.NodeType.AND if node_type == "AND" else hpa.NodeType.OR
+
+        self.node.description = ans_dict.get("node_description", self.node.description)
+
+        children = ans_dict.get("node_expansion", [])
+        if not isinstance(children, list) or not children:
+            raise ParseError("AND/OR node requires a non-empty 'expansion' list.")
+
+        self.node.children = []
+        for child_text in children:
+            if not isinstance(child_text, str):
+                continue
+            score = None
+            clean_text = child_text.strip()
+            # if node_type == "OR":
+            #     score, clean_text = self._extract_score(clean_text)
+            child = hpa.Node(
+                type=hpa.NodeType.UNKNOWN, description=clean_text, parent=self.node, score=score
+            )
+            self.node.add_child(child)
 
         return ans_dict
