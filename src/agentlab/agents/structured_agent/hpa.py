@@ -41,6 +41,8 @@ class HPA:
         self.pending_node: Node | None = None
         self.completed_nodes: list[Node] = []
         self._counter: int = 0
+        self.retries: int = 0
+        self.max_retries: int = 3
 
     def get_plan(self) -> (list[str], list[str]):
         completed_plan = [node.prompt_description for node in self.completed_nodes]
@@ -59,30 +61,34 @@ class HPA:
         self.stack = [(Node(type=NodeType.UNKNOWN, description=self.goal), NodeState.ENTERING)]
 
     def get_action_node(self, expansion_function) -> Node | None:
-        while self.stack:
-            node, state = self.stack.pop()
+        while self.retries < self.max_retries:
+            while self.stack:
+                node, state = self.stack.pop()
 
-            if node.status == NodeStatus.PRUNED:
-                self._propagate_failure(node)
-                continue
+                if node.status == NodeStatus.PRUNED:
+                    self._propagate_failure(node)
+                    continue
 
-            if node.status == NodeStatus.DELETED:
-                continue
+                if node.status == NodeStatus.DELETED:
+                    continue
 
-            if state == NodeState.ENTERING:
-                self.pending_node = self._process_node_entering(node, expansion_function)
-                if self.pending_node.type == NodeType.ACTION:
-                    return self.pending_node
+                if state == NodeState.ENTERING:
+                    self.pending_node = self._process_node_entering(node, expansion_function)
+                    if self.pending_node.type == NodeType.ACTION:
+                        return self.pending_node
 
-            elif state == NodeState.EXITING:
-                self._process_node_exiting(node)
+                elif state == NodeState.EXITING:
+                    self._process_node_exiting(node)
 
-            elif state == NodeState.FAILED:
-                self._process_node_failed(node)
+                elif state == NodeState.FAILED:
+                    self._process_node_failed(node)
 
-            self._counter += 1
-            if self._counter >= self.budget:
-                break
+                self._counter += 1
+                if self._counter >= self.budget:
+                    break
+            self.retries += 1
+            self.stack = [(Node(type=NodeType.UNKNOWN, description=self.goal), NodeState.ENTERING)]
+        
 
         return None
 
