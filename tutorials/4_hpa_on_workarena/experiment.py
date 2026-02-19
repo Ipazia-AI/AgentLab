@@ -1,3 +1,4 @@
+from dataclasses import asdict
 from pathlib import Path
 
 from bgym import DEFAULT_BENCHMARKS
@@ -10,6 +11,7 @@ from agentlab.agents.generic_agent import (
     AGENT_4o_MINI,
 )
 from agentlab.agents.generic_agent.generic_agent import GenericAgentArgs
+from agentlab.agents.generic_agent.generic_agent_prompt import GenericPromptFlags
 from agentlab.agents.structured_agent.hpa_agent import HPAAgentArgs
 from agentlab.agents.structured_agent.hpa_prompt import HPAPromptFlags
 from agentlab.experiments.study import Study
@@ -19,40 +21,76 @@ from agentlab.llm.chat_api import OpenRouterModelArgs
 project_dir = Path(__file__).parents[2]
 load_dotenv(project_dir.joinpath(".env"), override=False)
 
-agent_args = AGENT_GPT5_MINI
-agent_args.flags.use_plan = True
-chat_model_args = agent_args.chat_model_args
+prompt_flags = GenericPromptFlags(
+    obs=dp.ObsFlags(
+        use_html=False,
+        use_ax_tree=True,
+        use_focused_element=True,
+        use_error_logs=True,
+        use_history=True,
+        use_past_error_logs=False,
+        use_action_history=True,
+        use_think_history=True,
+        use_diff=False,
+        html_type="pruned_html",
+        use_screenshot=False,
+        use_som=False,
+        extract_visible_tag=True,
+        extract_clickable_tag=True,
+        extract_coords="False",
+        filter_visible_elements_only=False,
+    ),
+    action=dp.ActionFlags(
+        multi_actions=False,
+        action_set="bid",
+        long_description=False,
+        individual_examples=False,
+    ),
+    use_plan=False,
+    use_criticise=False,
+    use_thinking=True,
+    use_memory=False,
+    use_concrete_example=True,
+    use_abstract_example=True,
+    use_hints=True,
+    enable_chat=False,
+    max_prompt_tokens=40_000,
+    be_cautious=True,
+    extra_instructions=None,
+)
+# agent_args.flags.use_plan = True
+# chat_model_args = agent_args.chat_model_args
 # agent_args.chat_model_args.temperature = 0.0
 
-# chat_model_args = OpenRouterModelArgs(
-#     model_name="google/gemini-3-flash-preview",
-#     max_total_tokens=1_050_000,
-#     max_input_tokens=1_050_000 - 65_536,
-#     max_new_tokens=65_536,
-#     temperature=0.1,
-# )
+chat_model_args = OpenRouterModelArgs(
+    model_name="openai/gpt-oss-120b",
+    max_total_tokens=131_072,
+    max_input_tokens=131_072 - 40_000,
+    max_new_tokens=40_000,
+)
+
+hpa_prompt_flags = HPAPromptFlags(
+    obs=prompt_flags.obs,
+    action=prompt_flags.action,
+    use_constraints=True,
+    use_progress=True,
+    use_suggestion=True,
+    use_plan=prompt_flags.use_plan,
+    use_criticise=prompt_flags.use_criticise,
+    use_thinking=prompt_flags.use_thinking,
+    use_memory=prompt_flags.use_memory,
+    use_concrete_example=prompt_flags.use_concrete_example,
+    use_abstract_example=prompt_flags.use_abstract_example,
+    use_hints=prompt_flags.use_hints,
+    enable_chat=prompt_flags.enable_chat,
+    max_prompt_tokens=prompt_flags.max_prompt_tokens,
+    be_cautious=prompt_flags.be_cautious,
+    extra_instructions=prompt_flags.extra_instructions,
+)
 
 agent_config = HPAAgentArgs(
     chat_model_args=chat_model_args,
-    flags=HPAPromptFlags(
-        action=agent_args.flags.action,
-        obs=agent_args.flags.obs,
-        use_concrete_example=agent_args.flags.use_concrete_example,
-        use_abstract_example=agent_args.flags.use_abstract_example,
-        use_hints=agent_args.flags.use_hints,
-        use_memory=agent_args.flags.use_memory,
-        use_plan=agent_args.flags.use_plan,
-        use_criticise=agent_args.flags.use_criticise,
-        use_thinking=agent_args.flags.use_thinking,
-        be_cautious=agent_args.flags.be_cautious,
-        max_prompt_tokens=agent_args.flags.max_prompt_tokens,
-        max_trunc_itr=agent_args.flags.max_trunc_itr,
-        extra_instructions=agent_args.flags.extra_instructions,
-        use_constraints=True,
-        use_progress=True,
-        use_suggestion=True,
-    ),
-    max_retry=agent_args.max_retry,
+    flags=hpa_prompt_flags,
 )
 # agent_config = GenericAgentArgs(
 #     chat_model_args=agent_args.chat_model_args,
@@ -60,20 +98,15 @@ agent_config = HPAAgentArgs(
 #     max_retry=agent_args.max_retry,
 # )
 
-agent_config.flags.action = dp.ActionFlags(
-    long_description=False,
-    individual_examples=False,
-)
 agent_config.set_reproducibility_mode()
 
 agent_configs = [agent_config]
-benchmark = DEFAULT_BENCHMARKS["workarena_l1"]()
+benchmark = DEFAULT_BENCHMARKS["workarena_l2_agent_curriculum_eval"]()
 
 # metadata = benchmark.task_metadata
 # tasks_workload = metadata[metadata["task_name"].str.match("workarena.servicenow.all-menu")]
 # tasks_list = tasks_workload["task_name"].tolist()
 # benchmark = benchmark.subset_from_regexp("task_name", "workarena.servicenow.all-menu")
-
 
 # Optionally filter tasks:
 # benchmark = benchmark.subset_from_glob(column="task_name", glob="*create*")

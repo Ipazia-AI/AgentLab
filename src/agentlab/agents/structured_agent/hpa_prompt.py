@@ -15,24 +15,10 @@ from agentlab.llm.llm_utils import (
 
 
 @dataclass
-class HPAPromptFlags(dp.Flags):
-    action: dp.ActionFlags
-    obs: dp.ObsFlags
+class HPAPromptFlags(GenericPromptFlags):
     use_constraints: bool = True
     use_progress: bool = True
     use_suggestion: bool = True
-    use_planning: bool = True
-    use_concrete_example: bool = True
-    use_abstract_example: bool = False
-    use_hints: bool = False
-    use_plan: bool = False  #
-    be_cautious: bool = False
-    use_criticise: bool = False  #
-    use_thinking: bool = False
-    use_memory: bool = False  #
-    max_prompt_tokens: int = None
-    max_trunc_itr: int = 20
-    extra_instructions: str | None = None
 
 
 class Constraint(dp.PromptElement):
