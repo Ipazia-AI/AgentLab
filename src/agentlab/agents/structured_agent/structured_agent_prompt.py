@@ -118,6 +118,10 @@ class MainPrompt(dp.Shrinkable):
 
 # Current Plan Step:
 {self.current_plan_step}
+
+NOTE: Plan step descriptions are high-level intent. If they mention specific element bids
+(e.g. [a123]), IGNORE those bids — they are stale. Always find the matching element by its
+label, role, or visible text in the CURRENT AXTree above.
 """
         )
 

@@ -103,6 +103,9 @@ PRUNE nodes that are no longer relevant or are duplicates. A node is considered 
 
 Important Rules: 
 - You are only allowed to PRUNE nodes which status is not DELETED, PRUNED, or SUCCESS. 
+- NEVER prune UNVISITED or VISITED children of OR nodes — they are untried alternatives that
+  must be preserved as fallback strategies. The tree traversal logic will try them if needed.
+- NEVER prune nodes with SUCCESS status.
 - Only use existing node IDs from the current tree; do not create new node IDs or subtrees.
 - Pruning is not always necessary. Just fill the fields with empty lists or dictionaries if no changes are needed. Be precise in the changes you make, delete only nodes that do not lead to any further progress in the task.
 

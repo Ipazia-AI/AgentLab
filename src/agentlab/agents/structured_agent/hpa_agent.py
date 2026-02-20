@@ -179,6 +179,8 @@ class HPAAgent(GenericAgent):
         print(f"\n{'='*60}")
         print(f"Action for node {self.pending_action_node.id}: {self.pending_action_node.description}")
         print(f"{'='*60}")
+        # print(f"Prompt:\n{chat_messages}")
+        # print(f"{'='*60}")
         print(f"Action taken: {self.actions[-1]}")
         print(f"Think: {self.thoughts[-1]}")
         print(f"{'='*60}\n")

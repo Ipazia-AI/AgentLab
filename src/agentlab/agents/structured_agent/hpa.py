@@ -325,21 +325,36 @@ class HPA:
         """
         return [node for node in global_tree if node.id in node_ids]
 
+    def _is_protected_from_pruning(self, node: Node) -> bool:
+        """A node is protected if it already succeeded or is an untried
+        alternative under an OR parent (the tree logic should decide its fate,
+        not the global-update LLM)."""
+        if node.status == NodeStatus.SUCCESS:
+            return True
+        if (
+            node.parent is not None
+            and node.parent.type == NodeType.OR
+            and node.status in {NodeStatus.UNVISITED, NodeStatus.VISITED}
+        ):
+            return True
+        return False
+
     def _prune_nodes_from_global_tree(
         self, pruned_node_ids: list[str], global_tree: list[Node]
     ) -> None:
         """
-        Sets the status of the nodes with specified ids to PRUNED.
-
-        Args:
-            pruned_node_ids: list of node ids to prune from the global tree.
-            global_tree: list of nodes in the global tree.
-
-        Returns:
-            None
+        Sets the status of the nodes with specified ids to DELETED,
+        unless the node is protected (SUCCESS or untried OR alternative).
         """
         nodes_to_prune = self._get_nodes_from_ids(node_ids=pruned_node_ids, global_tree=global_tree)
         for node in nodes_to_prune:
+            if self._is_protected_from_pruning(node):
+                print(
+                    f"[PRUNE BLOCKED] Refusing to prune protected node {node.id} "
+                    f"(status={node.status.name}, parent_type="
+                    f"{node.parent.type.name if node.parent else 'ROOT'})"
+                )
+                continue
             node.status = NodeStatus.DELETED
         return
 

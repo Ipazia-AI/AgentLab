@@ -98,6 +98,9 @@ to discover insight related to the task that is being performed by a user.
 Review the instructions from the user, the current state of the page and all other information
 to find useful insights that can help the user accomplish their task.
 
+IMPORTANT: Do NOT include element bids (e.g. [a123], [b456]) in your output. Bids are ephemeral
+and change on every page update. Describe elements by their visible label, role, or position instead.
+
 ## Goal:
 """,
             )
@@ -235,10 +238,13 @@ Your task for the given node:
 - If you think the task can be completed through an action, mark the node as an action.
 - If you need to expand the task in subtasks, focus on expansions that will complete the task faster with high probability.
 - Before expanding the node, make sure to analyze the "Progress" and the "Suggestion" provided in the Hints section.
-- DO NOT EXPAND THE NODE with subgoals already listed as "Completed Nodes" or "Not Yet Explored Nodes".
+- DO NOT duplicate work already covered by sibling nodes shown in the Plan Context tree.
 - For AND and OR nodes, provide the ordered list of logical subgoals.
 - For AND and OR nodes, ensure temporal order of children is correct and efficient.
 - Do not add speculative or redundant subgoals.
+- NEVER include element bids (e.g. [a123], [b456]) in node descriptions. Bids are ephemeral
+  and change on every page update. Describe elements by their visible label, role, or position
+  (e.g. "Click the 'View chart menu' button" NOT "Click bid [a960]").
 
 ## Goal:
 """,
@@ -299,6 +305,7 @@ IMPORTANT:
 - DO NOT duplicate work covered by sibling nodes.
 - Analyze [FAILED] nodes carefully and propose a DIFFERENT strategy.
 - If previous failed attempts are listed, avoid repeating the same approach.
+- NEVER reference element bids (e.g. [a123]) in your descriptions — they change on every page update.
 
 {tree_context}
 """
