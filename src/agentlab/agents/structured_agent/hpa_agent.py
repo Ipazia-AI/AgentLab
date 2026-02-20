@@ -32,7 +32,6 @@ from .hpa import HPA, Node
 @dataclass
 class HPAAgentArgs(GenericAgentArgs):
     budget: int = 1000
-    max_revision_count: int = 3
     flags: HPAPromptFlags = None
 
     def __post_init__(self):
@@ -47,7 +46,6 @@ class HPAAgentArgs(GenericAgentArgs):
             flags=self.flags,
             budget=self.budget,
             max_retry=self.max_retry,
-            max_revision_count=self.max_revision_count,
         )
 
 
@@ -58,10 +56,8 @@ class HPAAgent(GenericAgent):
         flags: HPAPromptFlags,
         budget: int,
         max_retry: int,
-        max_revision_count: int,
     ):
         self.budget = budget
-        self.max_revision_count = max_revision_count
         super().__init__(chat_model_args, flags, max_retry)
         self.constraints: str | None = None
         self.progress: str | None = None
@@ -74,13 +70,12 @@ class HPAAgent(GenericAgent):
         self.constraints = None
         self.progress = None
         self.suggestion = None
-        self.max_depth = 3
+        self.max_depth = 4
         self.hpa = HPA(
             chat_llm=self.chat_llm,
             action_set=self.action_set,
             flags=self.flags,
             budget=self.budget,
-            max_revision_count=self.max_revision_count,
             max_depth=self.max_depth,
         )
 
@@ -140,8 +135,8 @@ class HPAAgent(GenericAgent):
         self.progress = ans_dict.get("progress", None)
         self.suggestion = ans_dict.get("suggestion", None)
 
-    def _infer_plan(self, node: Node, actual_plan: (list[str], list[str])):
-        self.pending_action_node, chat_messages, stats = self._infer(
+    def _infer_plan(self, node: Node, tree_context: str):
+        _, chat_messages, stats = self._infer(
             PlanningPrompt(
                 node=node,
                 max_depth=self.max_depth,
@@ -152,7 +147,7 @@ class HPAAgent(GenericAgent):
                 constraints=self.constraints,
                 progress=self.progress,
                 suggestion=self.suggestion,
-                actual_plan=actual_plan,
+                tree_context=tree_context,
                 flags=self.flags,
             ),
             SystemMessage(SystemPlanningPrompt().prompt),
@@ -160,26 +155,33 @@ class HPAAgent(GenericAgent):
 
     def _infer_action(self) -> tuple[Discussion, dict]:
 
+        main_prompt = MainPrompt(
+            action_set=self.action_set,
+            obs_history=self.obs_history,
+            actions=self.actions,
+            memories=self.memories,
+            thoughts=self.thoughts,
+            current_plan_step=self.pending_action_node.description,
+            completed_plan_steps=self.hpa.get_plan()[0],
+            future_plan_steps=self.hpa.get_plan()[1],
+            flags=self.flags,
+        )
+
         ans_dict, chat_messages, stats = self._infer(
-            MainPrompt(
-                action_set=self.action_set,
-                obs_history=self.obs_history,
-                actions=self.actions,
-                memories=self.memories,
-                thoughts=self.thoughts,
-                current_plan_step=self.pending_action_node.description,
-                completed_plan_steps=self.hpa.get_plan()[0],
-                future_plan_steps=self.hpa.get_plan()[1],
-                flags=self.flags,
-            ),
+            main_prompt,
             SystemMessage(dp.SystemPrompt().prompt),
         )
 
-        # self.plan = ans_dict.get("plan", self.plan)
-        # self.plan_step = ans_dict.get("step", self.plan_step)
         self.actions.append(ans_dict.get("action", None))
         self.memories.append(ans_dict.get("memory", None))
         self.thoughts.append(ans_dict.get("think", None))
+
+        print(f"\n{'='*60}")
+        print(f"Action for node {self.pending_action_node.id}: {self.pending_action_node.description}")
+        print(f"{'='*60}")
+        print(f"Action taken: {self.actions[-1]}")
+        print(f"Think: {self.thoughts[-1]}")
+        print(f"{'='*60}\n")
 
         return chat_messages, stats
 

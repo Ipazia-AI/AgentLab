@@ -58,12 +58,9 @@ prompt_flags = GenericPromptFlags(
     be_cautious=True,
     extra_instructions=None,
 )
-# agent_args.flags.use_plan = True
-# chat_model_args = agent_args.chat_model_args
-# agent_args.chat_model_args.temperature = 0.0
 
 chat_model_args = OpenRouterModelArgs(
-    model_name="openai/gpt-oss-120b",
+    model_name="google/gemini-3-flash-preview",
     max_total_tokens=131_072,
     max_input_tokens=131_072 - 40_000,
     max_new_tokens=40_000,
@@ -92,31 +89,19 @@ agent_config = HPAAgentArgs(
     chat_model_args=chat_model_args,
     flags=hpa_prompt_flags,
 )
-# agent_config = GenericAgentArgs(
-#     chat_model_args=agent_args.chat_model_args,
-#     flags=agent_args.flags,
-#     max_retry=agent_args.max_retry,
-# )
 
 agent_config.set_reproducibility_mode()
 
 agent_configs = [agent_config]
-benchmark = DEFAULT_BENCHMARKS["workarena_l2_agent_curriculum_eval"]()
+benchmark = DEFAULT_BENCHMARKS["workarena_l1"]()
+benchmark.env_args_list = benchmark.env_args_list[:1]
 
-# metadata = benchmark.task_metadata
-# tasks_workload = metadata[metadata["task_name"].str.match("workarena.servicenow.all-menu")]
-# tasks_list = tasks_workload["task_name"].tolist()
-# benchmark = benchmark.subset_from_regexp("task_name", "workarena.servicenow.all-menu")
-
-# Optionally filter tasks:
-# benchmark = benchmark.subset_from_glob(column="task_name", glob="*create*")
-
-n_jobs = 10  # keep 1 for debugging
+n_jobs = 1  # keep 1 for debugging
 
 if __name__ == "__main__":
     study = Study(agent_configs, benchmark)
     study.run(
         n_jobs=n_jobs,
-        parallel_backend="ray",
+        parallel_backend="sequential",
         n_relaunch=1,
     )

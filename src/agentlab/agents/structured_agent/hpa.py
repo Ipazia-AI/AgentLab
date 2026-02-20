@@ -2,6 +2,8 @@ import json
 import logging
 from typing import List, Tuple
 
+logger = logging.getLogger(__name__)
+
 from bgym import AbstractActionSet
 
 from agentlab.agents import dynamic_prompting as dp
@@ -25,14 +27,12 @@ class HPA:
         action_set: AbstractActionSet,
         flags: HPAPromptFlags,
         budget: int = 1000,
-        max_revision_count: int = 3,
         max_depth: int = 3,
     ):
         self.chat_llm = chat_llm
         self.action_set = action_set
         self.flags = flags
-        self.budget = budget  # remove
-        self.max_revision_count = max_revision_count
+        self.budget = budget
         self.max_depth = max_depth
         self.stack: List[Tuple[Node, NodeState]] = []
         self.task_constraints: list[str] = []
@@ -40,6 +40,7 @@ class HPA:
         self.previous_notes: str | None = None
         self.pending_node: Node | None = None
         self.completed_nodes: list[Node] = []
+        self.previous_attempt_summaries: list[str] = []
         self._counter: int = 0
         self.retries: int = 0
         self.max_retries: int = 3
@@ -55,6 +56,92 @@ class HPA:
         ]
 
         return completed_plan, pending_plan
+
+    def get_tree_context(self, expanding_node: Node) -> str:
+        """Build a tree view of the plan from root, expanding only the ancestor path.
+
+        Nodes along the path from root to ``expanding_node`` have their children
+        shown (with status).  Other nodes appear as single lines so the LLM sees
+        the full structure without irrelevant subtree detail.
+        """
+        ancestor_ids: set[str] = set()
+        current = expanding_node
+        while current is not None:
+            ancestor_ids.add(current.id)
+            current = current.parent
+
+        root = expanding_node
+        while root.parent is not None:
+            root = root.parent
+
+        lines: list[str] = []
+
+        def _render(node: Node, depth: int, show_deleted_as_failed: bool = False) -> None:
+            if node.status == NodeStatus.DELETED:
+                if show_deleted_as_failed:
+                    indent = "  " * depth
+                    lines.append(f"{indent}[FAILED] {node.id}: {node.description}")
+                return
+
+            indent = "  " * depth
+
+            status_prefix = ""
+            if node.status == NodeStatus.SUCCESS:
+                status_prefix = "[SUCCESS] "
+            elif node.status == NodeStatus.FAIL:
+                err = f": {node.action_error}" if node.action_error else ""
+                status_prefix = f"[FAIL{err}] "
+            elif node.status == NodeStatus.PRUNED:
+                status_prefix = "[PRUNED] "
+            elif node.status == NodeStatus.VISITED:
+                status_prefix = "[VISITED] "
+
+            type_label = ""
+            if node.type in {NodeType.AND, NodeType.OR}:
+                type_label = f" ({node.type.name})"
+
+            marker = ""
+            if node.id == expanding_node.id:
+                marker = "  ← EXPAND THIS NODE"
+
+            lines.append(
+                f"{indent}{status_prefix}{node.id}{type_label}: {node.description}{marker}"
+            )
+
+            if node.id in ancestor_ids:
+                is_or = node.type == NodeType.OR
+                for child in node.children:
+                    _render(child, depth + 1, show_deleted_as_failed=is_or)
+
+        _render(root, 0)
+        result = "\n".join(lines)
+
+        if self.previous_attempt_summaries:
+            prev = "\n\n".join(
+                f"### Attempt {i + 1}:\n{summary}"
+                for i, summary in enumerate(self.previous_attempt_summaries)
+            )
+            result += f"\n\n## Previous Failed Attempts:\n{prev}"
+
+        return result
+
+    def _save_attempt_summary(self) -> None:
+        """Capture a full tree snapshot before a retry reset."""
+        root = self.stack[0][0] if self.stack else None
+        if root is None:
+            return
+
+        lines: list[str] = []
+
+        def _walk(node: Node, depth: int) -> None:
+            indent = "  " * depth
+            status = node.status.name
+            lines.append(f"{indent}[{status}] {node.id}: {node.description}")
+            for child in node.children:
+                _walk(child, depth + 1)
+
+        _walk(root, 0)
+        self.previous_attempt_summaries.append("\n".join(lines))
 
     def set_goal(self, obs_first: dict):
         self.goal = obs_first["goal"]
@@ -86,7 +173,10 @@ class HPA:
                 self._counter += 1
                 if self._counter >= self.budget:
                     break
+            if self.stack or self.completed_nodes:
+                self._save_attempt_summary()
             self.retries += 1
+            self.completed_nodes = []
             self.stack = [(Node(type=NodeType.UNKNOWN, description=self.goal), NodeState.ENTERING)]
         
 
@@ -119,41 +209,38 @@ class HPA:
 
     # Algo 2 from the HPA paper
     def _process_node_entering(self, node: Node, expansion_function) -> Node:
-        if node.parent and node.parent.type == NodeType.OR:
-            # TODO: The role of this function is not clear, let's check it later what it is supposed to do.
-            self._rollback_context(node.parent)
-
-        # TODO: The role of this function is not clear, let's check it later what it is supposed to do.
-        self._set_context(node)
         node.execution_count += 1
 
         if node.type == NodeType.UNKNOWN:
-            expansion_function(node, self.get_plan())
-            self.stack.append((node, NodeState.EXITING))
+            tree_context = self.get_tree_context(node)
+            print(f"\n{'='*60}\nExpanding node {node.id}\n{'='*60}\n{tree_context}\n{'='*60}\n")
+            expansion_function(node, tree_context)
 
         if node.type == NodeType.ACTION:
+            self.stack.append((node, NodeState.EXITING))
             return node
 
         if node.type == NodeType.AND:
             if self._has_successful_children_and(node):
                 return node
+            self.stack.append((node, NodeState.EXITING))
             if self._has_valid_children_and(node):
                 for child in reversed(node.children):
-                    # If node is in state UNVISITED, VISITED or FAIL
                     if child.status not in self._closed_statuses():
                         self.stack.append((child, NodeState.ENTERING))
             else:
                 node.status = NodeStatus.FAIL
 
-        if node.type == NodeType.OR:
+        elif node.type == NodeType.OR:
             if self._has_successful_children_or(node):
                 return node
+            self.stack.append((node, NodeState.EXITING))
             if self._has_valid_children_or(node):
                 child = self._select_promising_child(node)
                 self.stack.append((child, NodeState.ENTERING))
             else:
                 node.status = NodeStatus.FAIL
-        # return None
+
         return node
 
     # Algo 3 from the HPA paper
@@ -162,24 +249,18 @@ class HPA:
             self.completed_nodes.append(node)
             if node.status in {NodeStatus.FAIL, NodeStatus.PRUNED}:
                 self.stack.append((node, NodeState.FAILED))
+
+        elif node.type == NodeType.AND:
+            if self._has_successful_children_and(node) and self._check_and_complete(node):
+                node.status = NodeStatus.SUCCESS
                 return
-        else:
-            node.status = NodeStatus.SUCCESS
-
-        if node.type == NodeType.AND:
-            if self._has_successful_children_and(node):
-                if self._check_and_complete(node):
-                    node.status = NodeStatus.SUCCESS
-                    return
-
             node.status = NodeStatus.FAIL
             self.stack.append((node, NodeState.FAILED))
 
-        if node.type == NodeType.OR:
+        elif node.type == NodeType.OR:
             if self._has_successful_children_or(node):
                 node.status = NodeStatus.SUCCESS
                 return
-
             node.status = NodeStatus.FAIL
             self.stack.append((node, NodeState.FAILED))
 
@@ -187,82 +268,28 @@ class HPA:
     def _process_node_failed(self, node: Node):
         if node.type == NodeType.ACTION:
             node.status = NodeStatus.PRUNED
-            # If a failed ACTION node belongs to an
-            # AND node, the agent deletes all remaining unexecuted siblings (This is what the _propagate_failure function does)
             self._propagate_failure(node)
             return
 
         elif node.type == NodeType.AND:
-            if self._has_successful_children_and(node):
-                is_complete = self._check_and_complete(node)
-                if is_complete:
-                    node.status = NodeStatus.SUCCESS
-            is_valid = self._has_valid_children_and(node)
-            if not is_valid:
-                if node.revision_count < self.max_revision_count:
-                    revised = self._revise_and(node)
-                    if node.status == NodeStatus.SUCCESS:
-                        return
-                    elif revised or is_valid:
-                        node.status = NodeStatus.VISITED
-                        self.stack.append((node, NodeState.ENTERING))
-                    else:
-                        node.status = NodeStatus.PRUNED
-                        self._propagate_failure(node)
+            if self._has_successful_children_and(node) and self._check_and_complete(node):
+                node.status = NodeStatus.SUCCESS
+                return
+            if not self._get_valid_children(node):
+                node.status = NodeStatus.PRUNED
+                self._propagate_failure(node)
 
         elif node.type == NodeType.OR:
             if self._has_valid_children_or(node):
                 node.status = NodeStatus.VISITED
                 self.stack.append((node, NodeState.ENTERING))
                 return
-
-            if node.revision_count < self.max_revision_count:
-                revised = self._revise_or(node)
-                if revised:
-                    node.status = NodeStatus.VISITED
-                    self.stack.append((node, NodeState.ENTERING))
-                else:
-                    node.status = NodeStatus.PRUNED
-                    self._propagate_failure(node)
-
-    # def _extract_score(self, text: str) -> tuple[float | None, str]:
-    #     if "(score:" not in text:
-    #         return None, text
-    #     try:
-    #         before, after = text.split("(score:", 1)
-    #         score_part = after.split(")", 1)[0]
-    #         score = float(score_part.strip())
-    #         cleaned = (before + after.split(")", 1)[1]).strip()
-    #         return score, cleaned
-    #     except (ValueError, IndexError):
-    #         return None, text
+            node.status = NodeStatus.PRUNED
+            self._propagate_failure(node)
 
     def _select_promising_child(self, node: Node) -> Node:
         valid_children = self._get_valid_children(node)
         return max(valid_children, key=lambda child: child.score or 0.0)
-
-    def _describe_local_tree(self, node: Node) -> str:
-        parts: list[str] = []
-        if node.parent is None:
-            return "root_node"
-        parts.append(f"PARENT: {str(node.parent)}")
-        if node.parent.children:
-            siblings = [str(child) for child in node.parent.children if child is not node]
-            if siblings:
-                parts.append("SIBLINGS:\n" + "\n".join(siblings))
-        if node.parent.parent and node.parent.parent.children:
-            parent_siblings = [
-                str(child) for child in node.parent.parent.children if child is not node.parent
-            ]
-            if parent_siblings:
-                parts.append("PARENT SIBLINGS:\n" + "\n".join(parent_siblings))
-        return "\n".join(parts)
-
-    def _rollback_context(self, node: Node):
-        pass
-
-    def _set_context(self, node: Node):
-        pass
 
     def _get_global_tree(self) -> list[Node]:
         """
@@ -274,9 +301,6 @@ class HPA:
         Returns:
             List[Node]: List of nodes in the global tree.
         """
-        # if not getattr(self, "root_node", None):
-        #     return []
-
         def walk_tree(node: Node, nodes_list: list[Node]):
             if node.status == NodeStatus.DELETED:
                 return
@@ -316,7 +340,6 @@ class HPA:
         """
         nodes_to_prune = self._get_nodes_from_ids(node_ids=pruned_node_ids, global_tree=global_tree)
         for node in nodes_to_prune:
-            # node.status = NodeStatus.PRUNED
             node.status = NodeStatus.DELETED
         return
 
@@ -421,30 +444,10 @@ class HPA:
         if deleted_ids:
             self.stack = [(n, st) for (n, st) in self.stack if n.id not in deleted_ids]
 
-    # def _synchronize_stack(self):
-    #     pass
-
-    def _revise_and(self, node: Node) -> bool:
-        # The revision should probably:
-        # 1. Remove all not valid children
-        # 2. Remove the not valid children from the stack
-        # 3. Create all the new children nodes
-        node.revision_count += 1
-        return False
-
-    def _revise_or(self, node: Node) -> bool:
-        # The revision should probably:
-        # 1. Remove all not valid children
-        # 2. Remove the not valid children from the stack
-        # 3. Create all the new children nodes
-        node.revision_count += 1
-        return False
-
     def _closed_statuses(self):
         return {NodeStatus.SUCCESS, NodeStatus.DELETED, NodeStatus.PRUNED}
 
     def _has_successful_children_and(self, node: Node) -> bool:
-        # return all(c.status == NodeStatus.SUCCESS for c in node.children)
         return all(
             c.status == NodeStatus.SUCCESS or c.status == NodeStatus.DELETED for c in node.children
         )
@@ -453,7 +456,6 @@ class HPA:
         return any(c.status == NodeStatus.SUCCESS for c in node.children)
 
     def _has_valid_children_and(self, node: Node) -> bool:
-        # return all(c.status not in {NodeStatus.PRUNED, NodeStatus.DELETED} for c in node.children)
         return all(c.status not in {NodeStatus.PRUNED} for c in node.children)
 
     def _has_valid_children_or(self, node: Node) -> bool:
@@ -467,9 +469,6 @@ class HPA:
 
     def _get_valid_children(self, node: Node) -> list[Node]:
         return [c for c in node.children if c.status not in {NodeStatus.PRUNED, NodeStatus.DELETED}]
-
-    def _is_root(self, node: Node) -> bool:
-        return node.parent is None
 
     def _call_json_prompt(
         self, model_name: str, system_message: str, user_message: str | dp.Shrinkable
@@ -499,16 +498,3 @@ class HPA:
                 raise ParseError(f"Return valid JSON only. Error: {exc}") from exc
 
         return retry(self.chat_llm, messages, n_retry=2, parser=parser)
-
-
-def main():
-    root = Node(type=NodeType.UNKNOWN, description="Solve task")
-    agent = HPA(chat_llm=None, action_set=None)
-    agent.reset(root_node=root, goal="Complete the task")
-    next_action = agent.run_until_action()
-    if next_action is not None:
-        logging.info("Next action: %s", next_action.text)
-
-
-if __name__ == "__main__":
-    main()

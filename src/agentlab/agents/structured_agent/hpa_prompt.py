@@ -274,13 +274,10 @@ class PlanningHints(dp.PromptElement):
         constraints: str,
         progress: str,
         suggestion: str,
-        completed_nodes_description: str,
-        not_yet_explored_nodes_description: str,
+        tree_context: str,
         visible: bool = True,
     ):
         super().__init__(visible=visible)
-        completed_nodes_description = "\n".join(completed_nodes_description)
-        not_yet_explored_nodes_description = "\n".join(not_yet_explored_nodes_description)
         self._prompt = f"""
 # Hints
 
@@ -292,11 +289,18 @@ Here follows some information that can help you plan the task:
 
 ## Suggestion: {suggestion}
 
-## Completed Nodes:
-{completed_nodes_description}
+## Plan Context:
+The tree below shows the current plan. Nodes marked [SUCCESS] have succeeded,
+[FAIL] have been tried and failed, [FAILED] are previously attempted strategies
+that did not work, [PRUNED] have been abandoned, and [VISITED] have been
+partially explored. Only the path to the node being expanded is shown in detail.
 
-## Not Yet Explored Nodes:
-{not_yet_explored_nodes_description}
+IMPORTANT:
+- DO NOT duplicate work covered by sibling nodes.
+- Analyze [FAILED] nodes carefully and propose a DIFFERENT strategy.
+- If previous failed attempts are listed, avoid repeating the same approach.
+
+{tree_context}
 """
 
 
@@ -519,7 +523,7 @@ class PlanningPrompt(dp.Shrinkable):
         constraints: str,
         progress: str,
         suggestion: str,
-        actual_plan: (list[str], list[str]),
+        tree_context: str,
         max_depth: int,
         flags: HPAPromptFlags,
     ):
@@ -536,8 +540,7 @@ class PlanningPrompt(dp.Shrinkable):
             constraints=constraints,
             progress=progress,
             suggestion=suggestion,
-            completed_nodes_description=actual_plan[0],
-            not_yet_explored_nodes_description=actual_plan[1],
+            tree_context=tree_context,
         )
         self.action_node = ActionNode(
             description="Click on the IPhone Pro 12 128GB Pacific Blue listing",
