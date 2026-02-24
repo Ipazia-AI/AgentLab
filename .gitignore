@@ -184,3 +184,4 @@ src/agentlab/_version.py
 
 # planning data
 planning_data
+.tmp_results/
