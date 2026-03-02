@@ -44,6 +44,7 @@ class HPA:
         self._counter: int = 0
         self.retries: int = 0
         self.max_retries: int = 3
+        self.step_trace: list[dict] = []
 
     def get_plan(self) -> (list[str], list[str]):
         completed_plan = [node.prompt_description for node in self.completed_nodes]
@@ -56,6 +57,39 @@ class HPA:
         ]
 
         return completed_plan, pending_plan
+
+    def clear_step_trace(self) -> list[dict]:
+        """Return accumulated trace records and reset for the next step."""
+        trace = self.step_trace
+        self.step_trace = []
+        return trace
+
+    def _serialize_tree(self) -> list[dict]:
+        """Return a pickle-safe snapshot of the full tree (no parent refs)."""
+        if not self.stack:
+            return []
+        root = self.stack[0][0]
+        while root.parent is not None:
+            root = root.parent
+        nodes: list[dict] = []
+
+        def _walk(node: Node):
+            if node.status == NodeStatus.DELETED:
+                return
+            nodes.append(
+                {
+                    "id": node.id,
+                    "type": node.type.name,
+                    "status": node.status.name,
+                    "description": node.description,
+                    "children_ids": [c.id for c in node.children],
+                }
+            )
+            for child in node.children:
+                _walk(child)
+
+        _walk(root)
+        return nodes
 
     def get_tree_context(self, expanding_node: Node) -> str:
         """Build a tree view of the plan from root, expanding only the ancestor path.
@@ -162,6 +196,22 @@ class HPA:
                 if state == NodeState.ENTERING:
                     self.pending_node = self._process_node_entering(node, expansion_function)
                     if self.pending_node.type == NodeType.ACTION:
+                        self.step_trace.append(
+                            {
+                                "type": "stack_snapshot",
+                                "action_node_id": self.pending_node.id,
+                                "action_node_description": self.pending_node.description,
+                                "stack": [
+                                    {
+                                        "node_id": n.id,
+                                        "description": n.description,
+                                        "state": st.name,
+                                    }
+                                    for n, st in self.stack
+                                ],
+                                "tree_snapshot": self._serialize_tree(),
+                            }
+                        )
                         return self.pending_node
 
                 elif state == NodeState.EXITING:
@@ -214,7 +264,27 @@ class HPA:
         if node.type == NodeType.UNKNOWN:
             tree_context = self.get_tree_context(node)
             print(f"\n{'='*60}\nExpanding node {node.id}\n{'='*60}\n{tree_context}\n{'='*60}\n")
-            expansion_function(node, tree_context)
+            desc_before = node.description
+            tree_snapshot_before = self._serialize_tree()
+            expansion_result = expansion_function(node, tree_context)
+            ans_dict = expansion_result[0] if expansion_result else {}
+            chat_msgs = expansion_result[1] if expansion_result and len(expansion_result) > 1 else None
+            self.step_trace.append(
+                {
+                    "type": "node_expansion",
+                    "node_id": node.id,
+                    "node_description_before": desc_before,
+                    "tree_context": tree_context,
+                    "tree_snapshot_before": tree_snapshot_before,
+                    "node_type_after": node.type.name,
+                    "node_description_after": node.description,
+                    "children": [
+                        {"id": c.id, "description": c.description} for c in node.children
+                    ],
+                    "expansion_ans_dict": ans_dict,
+                    "expansion_chat_messages": chat_msgs,
+                }
+            )
 
         if node.type == NodeType.ACTION:
             self.stack.append((node, NodeState.EXITING))
@@ -418,9 +488,19 @@ class HPA:
         result = self._call_json_prompt(model_name, system_message, user_message)
         pruned_node_ids = result.get("prune", [])
         updated_node_ids = result.get("update", {})
+        tree_snapshot_before = self._serialize_tree()
         self._prune_nodes_from_global_tree(pruned_node_ids=pruned_node_ids, global_tree=global_tree)
         self._update_nodes_in_global_tree(
             updated_node_ids=updated_node_ids, global_tree=global_tree
+        )
+        self.step_trace.append(
+            {
+                "type": "global_tree_update",
+                "input_tree_info": global_tree_info,
+                "tree_snapshot_before": tree_snapshot_before,
+                "tree_snapshot_after": self._serialize_tree(),
+                "result": result,
+            }
         )
         return
 

@@ -1,5 +1,6 @@
 import base64
 import html
+import json
 import os
 import traceback
 from copy import deepcopy
@@ -420,6 +421,9 @@ clicking the refresh button.
             with gr.Tab("Agent Info MD") as tab_agent_info_md:
                 agent_info_md = gr.Markdown()
 
+            with gr.Tab("Agent Log") as tab_agent_log:
+                agent_log = gr.Code(language="json", interactive=False, show_label=False)
+
             with gr.Tab("Prompt tests") as tab_prompt_tests:
                 with gr.Row():
                     prompt_markdown = gr.Textbox(
@@ -510,6 +514,7 @@ clicking the refresh button.
             outputs=[agent_info_html, screenshot1_agent, screenshot2_agent],
         )
         step_id.change(fn=if_active("Agent Info MD")(update_agent_info_md), outputs=agent_info_md)
+        step_id.change(fn=if_active("Agent Log")(update_agent_log), outputs=agent_log)
         step_id.change(
             fn=if_active("Prompt tests", 2)(update_prompt_tests),
             outputs=[prompt_markdown, prompt_tests_textbox],
@@ -534,6 +539,7 @@ clicking the refresh button.
         tab_stats.select(fn=update_stats, outputs=stats)
         tab_agent_info_html.select(fn=update_agent_info_html, outputs=agent_info_html)
         tab_agent_info_md.select(fn=update_agent_info_md, outputs=agent_info_md)
+        tab_agent_log.select(fn=update_agent_log, outputs=agent_log)
         tab_prompt_tests.select(
             fn=update_prompt_tests, outputs=[prompt_markdown, prompt_tests_textbox]
         )
@@ -833,6 +839,18 @@ def update_agent_info_md():
         if page is None:
             page = """Fill up markdown_page attribute in AgentInfo to display here."""
         return page
+    except (FileNotFoundError, IndexError):
+        return None
+
+
+def update_agent_log():
+    global info
+    try:
+        agent_info = info.exp_result.steps_info[info.step].agent_info
+        log_data = agent_info.get("agent_log", None)
+        if log_data is None:
+            return "No agent_log attribute found in AgentInfo for this step."
+        return json.dumps(log_data, indent=2, default=str)
     except (FileNotFoundError, IndexError):
         return None
 
