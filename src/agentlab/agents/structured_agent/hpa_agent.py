@@ -101,6 +101,7 @@ class HPAAgent(GenericAgent):
         self.pending_action_node = self.hpa.get_action_node(self._infer_plan)
 
         hpa_trace = self.hpa.clear_step_trace()
+        cumulative_trace = self.hpa.get_cumulative_trace()
 
         if self.pending_action_node is not None:
             chat_messages, stats = self._infer_action()
@@ -115,7 +116,7 @@ class HPAAgent(GenericAgent):
                 },
                 markdown_page=_render_hpa_trace_markdown(hpa_trace),
             )
-            agent_info.agent_log = hpa_trace
+            agent_info.agent_log = cumulative_trace
 
             return self.actions[-1], agent_info
         else:
@@ -129,7 +130,7 @@ class HPAAgent(GenericAgent):
                 },
                 markdown_page=_render_hpa_trace_markdown(hpa_trace),
             )
-            agent_info.agent_log = hpa_trace
+            agent_info.agent_log = cumulative_trace
             return None, agent_info
 
     def _infer_insight(self):

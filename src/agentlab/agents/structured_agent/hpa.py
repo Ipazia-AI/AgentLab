@@ -1,5 +1,6 @@
 import json
 import logging
+from copy import copy
 from typing import List, Tuple
 
 logger = logging.getLogger(__name__)
@@ -45,6 +46,8 @@ class HPA:
         self.retries: int = 0
         self.max_retries: int = 3
         self.step_trace: list[dict] = []
+        self.cumulative_trace: list[dict] = []
+        self._step_counter: int = 0
 
     def get_plan(self) -> (list[str], list[str]):
         completed_plan = [node.prompt_description for node in self.completed_nodes]
@@ -62,7 +65,18 @@ class HPA:
         """Return accumulated trace records and reset for the next step."""
         trace = self.step_trace
         self.step_trace = []
+        self._step_counter += 1
         return trace
+
+    def get_cumulative_trace(self) -> list[dict]:
+        """Return the full trace accumulated across all steps so far."""
+        return list(self.cumulative_trace)
+
+    def _record_trace(self, record: dict) -> None:
+        """Append a trace record to both the per-step and cumulative traces."""
+        record["step"] = self._step_counter
+        self.step_trace.append(record)
+        self.cumulative_trace.append(record)
 
     def _serialize_tree(self) -> list[dict]:
         """Return a pickle-safe snapshot of the full tree (no parent refs)."""
@@ -196,7 +210,7 @@ class HPA:
                 if state == NodeState.ENTERING:
                     self.pending_node = self._process_node_entering(node, expansion_function)
                     if self.pending_node.type == NodeType.ACTION:
-                        self.step_trace.append(
+                        self._record_trace(
                             {
                                 "type": "stack_snapshot",
                                 "action_node_id": self.pending_node.id,
@@ -269,19 +283,19 @@ class HPA:
             expansion_result = expansion_function(node, tree_context)
             ans_dict = expansion_result[0] if expansion_result else {}
             chat_msgs = expansion_result[1] if expansion_result and len(expansion_result) > 1 else None
-            self.step_trace.append(
+            self._record_trace(
                 {
                     "type": "node_expansion",
                     "node_id": node.id,
-                    "node_description_before": desc_before,
+                    #"node_description_before": desc_before,
                     "tree_context": tree_context,
-                    "tree_snapshot_before": tree_snapshot_before,
-                    "node_type_after": node.type.name,
-                    "node_description_after": node.description,
+                    #"tree_snapshot_before": tree_snapshot_before,
+                    "node_type": node.type.name,
+                    "node_description": node.description,
                     "children": [
                         {"id": c.id, "description": c.description} for c in node.children
                     ],
-                    "expansion_ans_dict": ans_dict,
+                    #"expansion_ans_dict": ans_dict,
                     "expansion_chat_messages": chat_msgs,
                 }
             )
@@ -488,17 +502,17 @@ class HPA:
         result = self._call_json_prompt(model_name, system_message, user_message)
         pruned_node_ids = result.get("prune", [])
         updated_node_ids = result.get("update", {})
-        tree_snapshot_before = self._serialize_tree()
+        #tree_snapshot_before = self._serialize_tree()
         self._prune_nodes_from_global_tree(pruned_node_ids=pruned_node_ids, global_tree=global_tree)
         self._update_nodes_in_global_tree(
             updated_node_ids=updated_node_ids, global_tree=global_tree
         )
-        self.step_trace.append(
+        self._record_trace(
             {
                 "type": "global_tree_update",
                 "input_tree_info": global_tree_info,
-                "tree_snapshot_before": tree_snapshot_before,
-                "tree_snapshot_after": self._serialize_tree(),
+                # "tree_snapshot_before": tree_snapshot_before,
+                # "tree_snapshot_after": self._serialize_tree(),
                 "result": result,
             }
         )
