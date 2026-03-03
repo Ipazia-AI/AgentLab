@@ -176,7 +176,7 @@ class HPA:
             if self.stack or self.completed_nodes:
                 self._save_attempt_summary()
             self.retries += 1
-            self.completed_nodes = []
+            #self.completed_nodes = []
             self.stack = [(Node(type=NodeType.UNKNOWN, description=self.goal), NodeState.ENTERING)]
         
 
