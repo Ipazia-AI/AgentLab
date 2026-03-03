@@ -44,7 +44,7 @@ n_jobs = 1  # keep 1 for debugging
 
 if __name__ == "__main__":
     study = Study(agent_configs, benchmark)
-    study.override_max_steps(50)
+    study.override_max_steps(30)
     study.run(
         n_jobs=n_jobs,
         parallel_backend="sequential",

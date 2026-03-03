@@ -59,13 +59,11 @@ tasks_list = [
     "workarena.servicenow.sort-asset-list",
 ]
 benchmark = benchmark.subset_from_list(tasks_list, benchmark_name_suffix="hpa_reduced_l1")
-for env_args in benchmark.env_args_list:
-    env_args.max_steps = 50
 n_jobs = 1 
 
 if __name__ == "__main__":
     study = Study(agent_configs, benchmark)
-    study.override_max_steps(50)
+    study.override_max_steps(30)
     study.run(
         n_jobs=n_jobs,
         parallel_backend="sequential",
