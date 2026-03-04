@@ -95,9 +95,11 @@ agent_config.set_reproducibility_mode()
 agent_configs = [agent_config]
 benchmark = DEFAULT_BENCHMARKS["workarena_l1"]()
 benchmark = benchmark.subset_from_regexp(
-    column="task_name", regexp="workarena.servicenow.multi-chart-min-max-retrieval"
+    column="task_name", regexp="workarena.servicenow.single-chart-value-retrieval"
 )
-benchmark.env_args_list = benchmark.env_args_list[:1]
+env_args = benchmark.env_args_list[0]
+env_args.task_seed = 769
+benchmark.env_args_list = [env_args]
 
 n_jobs = 1  # keep 1 for debugging
 

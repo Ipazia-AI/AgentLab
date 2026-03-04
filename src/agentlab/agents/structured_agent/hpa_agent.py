@@ -5,6 +5,7 @@ from browsergym.experiments import AgentInfo
 
 from agentlab.agents import dynamic_prompting as dp
 from agentlab.agents.generic_agent.generic_agent import GenericAgent, GenericAgentArgs
+from agentlab.agents.structured_agent.analyze import format_hpa_plan_markdown
 from agentlab.agents.structured_agent.hpa_prompt import (
     HPAPromptFlags,
     InsightPrompt,
@@ -97,6 +98,7 @@ class HPAAgent(GenericAgent):
         self._infer_insight()
         self.pending_action_node = self.hpa.get_action_node(self._infer_plan)
         plan_info = self.hpa.get_telemetry(step_index=len(self.actions))
+        markdown_page = format_hpa_plan_markdown(plan_info)
 
         if self.pending_action_node is not None:
 
@@ -106,20 +108,19 @@ class HPAAgent(GenericAgent):
                 think=self.thoughts[-1],
                 chat_messages=chat_messages,
                 stats=stats,
+                markdown_page=markdown_page,
                 extra_info={"chat_model_args": asdict(self.chat_model_args), "hpa_plan": plan_info},
             )
-
             return self.actions[-1], agent_info
         else:
-            return None, AgentInfo(
+            agent_info = AgentInfo(
                 think=None,
                 chat_messages=Discussion(),
                 stats=self.chat_llm.get_stats(),
-                extra_info={
-                    "chat_model_args": asdict(self.chat_model_args),
-                    "hpa_plan": plan_info,
-                },
+                markdown_page=markdown_page,
+                extra_info={"chat_model_args": asdict(self.chat_model_args), "hpa_plan": plan_info},
             )
+            return None, agent_info
 
     def _infer_insight(self):
         ans_dict, _, _ = self._infer(
