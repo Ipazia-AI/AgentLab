@@ -33,7 +33,7 @@ class HPA:
         )
 
     def get_plan(self) -> tuple[list[str], list[str]]:
-        return self.telemetry.get_plan()
+        return self.stack.plan
 
     def set_goal(self, obs_first: dict):
         self.goal = obs_first["goal"]
@@ -131,8 +131,6 @@ class HPA:
         return self.telemetry.build_plan_info(
             step_index=step_index,
             pending_node=self.pending_node,
-            completed_nodes=self.stack.completed_nodes,
-            stack=self.stack.items,
             max_depth=self.max_depth,
             budget=self.budget,
             max_retries=self.max_retries,

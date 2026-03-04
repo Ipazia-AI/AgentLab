@@ -1,40 +1,13 @@
-from dataclasses import dataclass
-
 from agentlab.agents.structured_agent.stack import Stack
 
-from .andor_tree import Node, NodeState, NodeStatus, NodeType
-
-
-@dataclass
-class TreeContextEntry:
-    depth: int
-    node_id: str
-    description: str
-    status: str
-    type_label: str
-    marker_expand: bool = False
-    action_error: str | None = None
-
-    def format(self) -> str:
-        indent = "  " * self.depth
-        status_prefix = ""
-        if self.status == "FAIL":
-            err = f": {self.action_error}" if self.action_error else ""
-            status_prefix = f"[FAIL{err}] "
-        elif self.status:
-            status_prefix = f"[{self.status}] "
-        type_label = f" ({self.type_label})" if self.type_label else ""
-        marker = "  ← EXPAND THIS NODE" if self.marker_expand else ""
-        return f"{indent}{status_prefix}{self.node_id}{type_label}: {self.description}{marker}"
-
-
-@dataclass
-class TreeExpansionTrace:
-    retry: int
-    expanded_node: Node
-    children_after: list[Node]
-    tree_context_before: list[TreeContextEntry]
-    tree_context_after: list[TreeContextEntry]
+from .andor_tree import (
+    Node,
+    NodeState,
+    NodeStatus,
+    NodeType,
+    TreeContextEntry,
+    TreeExpansionTrace,
+)
 
 
 class PlanTelemetry:
