@@ -176,6 +176,8 @@ class HPAAgent(GenericAgent):
         self.memories.append(ans_dict.get("memory", None))
         self.thoughts.append(ans_dict.get("think", None))
 
+        self.pending_action_node.action = self.actions[-1]
+
         print(f"\n{'='*60}")
         print(f"Action for node {self.pending_action_node.id}: {self.pending_action_node.description}")
         print(f"{'='*60}")

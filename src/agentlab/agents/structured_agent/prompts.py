@@ -85,6 +85,12 @@ Node status indicators:
 - SUCCESS: for completed nodes 
 - FAIL: for temporarily failed nodes
 
+Each node has a NODE ACTION field that shows the exact browser command executed for
+ACTION nodes (e.g. click('a1201'), hover('a456')). Use this information to detect when multiple
+nodes attempted the same action — this is a sign of a stuck loop that should be pruned
+or updated. Note: the element bids in these actions are historical and may no longer
+be valid on the current page.
+
 This is the list of browser actions that can be performed on the webpage:
 {self.action_prompt}
 
@@ -118,6 +124,7 @@ UPDATE the description of the nodes to set the new goal of the node based on the
         - The update should be based on the current state of information available.
         - The update should be precise in the changes you make, update only nodes that need to be updated.
         - The update is not always necessary. Just fill the fields with empty lists or dictionaries if no changes are needed.
+        - NEVER add a particular action to the description of the node, just the general description of the node's objective.
     ### GENERAL RULES:
         - NEVER PRUNE or UPDATE the same nodes, you can only prune or update a node once.
 

@@ -104,8 +104,12 @@ class HPA:
             if node.id == expanding_node.id:
                 marker = "  ← EXPAND THIS NODE"
 
+            action_suffix = ""
+            if node.action and node.type == NodeType.ACTION:
+                action_suffix = f"  [action: {node.action}]"
+
             lines.append(
-                f"{indent}{status_prefix}{node.id}{type_label}: {node.description}{marker}"
+                f"{indent}{status_prefix}{node.id}{type_label}: {node.description}{action_suffix}{marker}"
             )
 
             if node.id in ancestor_ids:
@@ -136,7 +140,10 @@ class HPA:
         def _walk(node: Node, depth: int) -> None:
             indent = "  " * depth
             status = node.status.name
-            lines.append(f"{indent}[{status}] {node.id}: {node.description}")
+            action_suffix = ""
+            if node.action and node.type == NodeType.ACTION:
+                action_suffix = f"  [action: {node.action}]"
+            lines.append(f"{indent}[{status}] {node.id}: {node.description}{action_suffix}")
             for child in node.children:
                 _walk(child, depth + 1)
 
@@ -216,6 +223,7 @@ class HPA:
             tree_context = self.get_tree_context(node)
             print(f"\n{'='*60}\nExpanding node {node.id}\n{'='*60}\n{tree_context}\n{'='*60}\n")
             expansion_function(node, tree_context)
+            node.status = NodeStatus.VISITED
 
         if node.type == NodeType.ACTION:
             self.stack.append((node, NodeState.EXITING))
@@ -331,6 +339,8 @@ class HPA:
         alternative under an OR parent (the tree logic should decide its fate,
         not the global-update LLM)."""
         if node.status == NodeStatus.SUCCESS:
+            return True
+        if node.status == NodeStatus.VISITED:
             return True
         if (
             node.parent is not None
