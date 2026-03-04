@@ -115,6 +115,8 @@ class TreeUpdateEngine:
         not the global-update LLM)."""
         if node.status == NodeStatus.SUCCESS:
             return True
+        if node.status == NodeStatus.VISITED:
+            return True
         if (
             node.parent is not None
             and node.parent.type == NodeType.OR

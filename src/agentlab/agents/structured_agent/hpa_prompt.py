@@ -245,6 +245,9 @@ Your task for the given node:
 - NEVER include element bids (e.g. [a123], [b456]) in node descriptions. Bids are ephemeral
   and change on every page update. Describe elements by their visible label, role, or position
   (e.g. "Click the 'View chart menu' button" NOT "Click bid [a960]").
+  Note: completed ACTION nodes in the Plan Context show [action: ...] annotations with
+  historical bids. Use these only to detect repeated actions, NOT to copy bids into new
+  node descriptions.
 
 ## Goal:
 """,
@@ -300,12 +303,20 @@ The tree below shows the current plan. Nodes marked [SUCCESS] have succeeded,
 [FAIL] have been tried and failed, [FAILED] are previously attempted strategies
 that did not work, [PRUNED] have been abandoned, and [VISITED] have been
 partially explored. Only the path to the node being expanded is shown in detail.
+Completed ACTION nodes include an [action: ...] annotation showing the exact
+browser command that was executed.
 
 IMPORTANT:
 - DO NOT duplicate work covered by sibling nodes.
 - Analyze [FAILED] nodes carefully and propose a DIFFERENT strategy.
 - If previous failed attempts are listed, avoid repeating the same approach.
-- NEVER reference element bids (e.g. [a123]) in your descriptions — they change on every page update.
+- Examine the [action: ...] annotations on completed nodes to understand what
+  concrete actions were already attempted. If multiple nodes executed the same
+  action without progress, do NOT plan another node that would repeat it.
+- NEVER reference element bids (e.g. [a123]) in your node descriptions — they
+  change on every page update. The bids shown in [action: ...] annotations are
+  historical and may no longer be valid; use them only to detect repetition, not
+  to plan future actions.
 
 {tree_context}
 """

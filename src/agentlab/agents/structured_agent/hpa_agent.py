@@ -179,14 +179,13 @@ class HPAAgent(GenericAgent):
         self.memories.append(ans_dict.get("memory", None))
         self.thoughts.append(ans_dict.get("think", None))
 
+        action = self.actions[-1]
+        self.pending_action_node.action = action
+
         print(f"\n{'='*60}")
-        print(
-            f"Action for node {self.pending_action_node.id}: {self.pending_action_node.description}"
-        )
+        print(f"Action Node {self.pending_action_node.id}: {self.pending_action_node.description}")
         print(f"{'='*60}")
-        # print(f"Prompt:\n{chat_messages}")
-        # print(f"{'='*60}")
-        print(f"Action taken: {self.actions[-1]}")
+        print(f"Inferred Action: {action}")
         print(f"Think: {self.thoughts[-1]}")
         print(f"{'='*60}\n")
 

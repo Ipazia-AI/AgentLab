@@ -27,6 +27,7 @@ class Stack:
         if node.type == NodeType.UNKNOWN:
             tree_context = get_tree_context(node)
             expansion_function(node, tree_context)
+            node.status = NodeStatus.VISITED
             on_unknown_expanded(node)
 
         if node.type == NodeType.ACTION:
@@ -146,16 +147,9 @@ class Stack:
         root = self.items[0][0] if self.items else None
         if root is None:
             return
-        lines: list[str] = []
 
-        def _walk(node: Node, depth: int) -> None:
-            indent = "  " * depth
-            lines.append(f"{indent}[{node.status.name}] {node.id}: {node.description}")
-            for child in node.children:
-                _walk(child, depth + 1)
-
-        _walk(root, 0)
-        return "\n".join(lines)
+        root_context = root.to_tree_context_entry()
+        return "\n".join(entry.format(disable_marker=True) for entry in root_context)
 
     @property
     def plan(self) -> tuple[list[str], list[str]]:
