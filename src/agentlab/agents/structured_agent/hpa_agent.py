@@ -12,10 +12,7 @@ from agentlab.agents.structured_agent.hpa_prompt import (
     SystemInsightPrompt,
     SystemPlanningPrompt,
 )
-from agentlab.agents.structured_agent.structured_agent_prompt import (
-    GenericPromptFlags,
-    MainPrompt,
-)
+from agentlab.agents.structured_agent.structured_agent_prompt import MainPrompt
 from agentlab.llm.base_api import BaseModelArgs
 from agentlab.llm.llm_utils import (
     BaseMessage,
@@ -81,7 +78,6 @@ class HPAAgent(GenericAgent):
 
     @cost_tracker_decorator
     def get_action(self, obs: Any):
-
         self.obs_history.append(obs)
 
         if len(self.obs_history) == 1:
@@ -89,7 +85,7 @@ class HPAAgent(GenericAgent):
 
         if self.pending_action_node is not None and isinstance(obs, dict):
             # To be adjusted to the right observation key depending on how we manage the success result
-            self.hpa.complete_pending(
+            self.hpa.complete_action_node(
                 self.chat_model_args.model_name,
                 self.constraints,
                 self.progress,
@@ -100,14 +96,17 @@ class HPAAgent(GenericAgent):
 
         self._infer_insight()
         self.pending_action_node = self.hpa.get_action_node(self._infer_plan)
+        plan_info = self.hpa.get_telemetry(step_index=len(self.actions))
+
         if self.pending_action_node is not None:
+
             chat_messages, stats = self._infer_action()
 
             agent_info = AgentInfo(
                 think=self.thoughts[-1],
                 chat_messages=chat_messages,
                 stats=stats,
-                extra_info={"chat_model_args": asdict(self.chat_model_args)},
+                extra_info={"chat_model_args": asdict(self.chat_model_args), "hpa_plan": plan_info},
             )
 
             return self.actions[-1], agent_info
@@ -116,11 +115,14 @@ class HPAAgent(GenericAgent):
                 think=None,
                 chat_messages=Discussion(),
                 stats=self.chat_llm.get_stats(),
-                extra_info={"chat_model_args": asdict(self.chat_model_args)},
+                extra_info={
+                    "chat_model_args": asdict(self.chat_model_args),
+                    "hpa_plan": plan_info,
+                },
             )
 
     def _infer_insight(self):
-        ans_dict, chat_messages, stats = self._infer(
+        ans_dict, _, _ = self._infer(
             InsightPrompt(
                 obs_history=self.obs_history,
                 actions=self.actions,
@@ -136,7 +138,7 @@ class HPAAgent(GenericAgent):
         self.suggestion = ans_dict.get("suggestion", None)
 
     def _infer_plan(self, node: Node, tree_context: str):
-        _, chat_messages, stats = self._infer(
+        self._infer(
             PlanningPrompt(
                 node=node,
                 max_depth=self.max_depth,
@@ -177,7 +179,9 @@ class HPAAgent(GenericAgent):
         self.thoughts.append(ans_dict.get("think", None))
 
         print(f"\n{'='*60}")
-        print(f"Action for node {self.pending_action_node.id}: {self.pending_action_node.description}")
+        print(
+            f"Action for node {self.pending_action_node.id}: {self.pending_action_node.description}"
+        )
         print(f"{'='*60}")
         # print(f"Prompt:\n{chat_messages}")
         # print(f"{'='*60}")
@@ -191,8 +195,6 @@ class HPAAgent(GenericAgent):
         self, main_prompt: dp.Shrinkable, system_prompt: BaseMessage
     ) -> tuple[dict, Discussion, dict]:
         max_prompt_tokens, max_trunc_itr = self._get_maxes()
-
-        system_prompt = SystemMessage(dp.SystemPrompt().prompt)
 
         human_prompt = dp.fit_tokens(
             shrinkable=main_prompt,
@@ -212,7 +214,7 @@ class HPAAgent(GenericAgent):
             ans_dict["busted_retry"] = 0
             # inferring the number of retries, TODO: make this less hacky
             ans_dict["n_retry"] = (len(chat_messages) - 3) / 2
-        except ParseError as e:
+        except ParseError:
             ans_dict = dict(
                 action=None,
                 n_retry=self.max_retry + 1,

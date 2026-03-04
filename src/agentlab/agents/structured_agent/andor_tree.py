@@ -3,6 +3,8 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
+from agentlab.agents.structured_agent.plan_telemetry import TreeContextEntry
+
 
 class NodeType(Enum):
     UNKNOWN = auto()
@@ -18,6 +20,9 @@ class NodeStatus(Enum):
     FAIL = auto()
     PRUNED = auto()
     DELETED = auto()
+
+
+CLOSED_STATUSES = {NodeStatus.SUCCESS, NodeStatus.DELETED, NodeStatus.PRUNED}
 
 
 class NodeState(Enum):
@@ -37,7 +42,6 @@ class Node(BaseModel):
     parent: Optional["Node"] = None
     children: list["Node"] = Field(default_factory=list)
 
-    score: Optional[float] = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     revision_count: int = 0
@@ -53,8 +57,94 @@ class Node(BaseModel):
         self.children.append(child)
 
     def __str__(self) -> str:
-        return f"Node(id={self.id}, type={self.type.name}, status={self.status.name}, description={self.description}, action={self.action}, action_error={self.action_error}, parent={self.parent.id if self.parent else None}, children={len(self.children)}, score={self.score or 'N/A'})"
+        return f"Node(id={self.id}, type={self.type.name}, status={self.status.name}, description={self.description}, action={self.action}, action_error={self.action_error}, parent={self.parent.id if self.parent else None}, children={len(self.children)})"
+
+    @property
+    def closed(self) -> bool:
+        return self.status in CLOSED_STATUSES
 
     @property
     def prompt_description(self) -> str:
         return f"{self.id}: {self.description}"
+
+    @property
+    def valid_children(self) -> list["Node"]:
+        return [c for c in self.children if c.status not in {NodeStatus.PRUNED, NodeStatus.DELETED}]
+
+    @property
+    def successful_children_and(self) -> bool:
+        return all(
+            c.status == NodeStatus.SUCCESS or c.status == NodeStatus.DELETED for c in self.children
+        )
+
+    @property
+    def successful_children_or(self) -> bool:
+        return any(c.status == NodeStatus.SUCCESS for c in self.children)
+
+    @property
+    def valid_children_and(self) -> bool:
+        return all(c.status not in {NodeStatus.PRUNED} for c in self.children)
+
+    @property
+    def valid_children_or(self) -> bool:
+        return any(c.status not in {NodeStatus.PRUNED, NodeStatus.DELETED} for c in self.children)
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "description": self.description,
+            "type": self.type.name,
+            "status": self.status.name,
+            "depth": self.depth,
+            "parent_id": None if self.parent is None else self.parent.id,
+            "parent_type": None if self.parent is None else self.parent.type.name,
+        }
+
+    def to_tree_context_entry(self) -> list[TreeContextEntry]:
+        ancestor_ids: set[str] = set()
+        current = self
+        while current is not None:
+            ancestor_ids.add(current.id)
+            current = current.parent
+
+        root = self
+        while root.parent is not None:
+            root = root.parent
+
+        entries: list[TreeContextEntry] = []
+
+        def _render(node: Node, depth: int, show_deleted_as_failed: bool = False) -> None:
+            if node.status == NodeStatus.DELETED:
+                if show_deleted_as_failed:
+                    entries.append(
+                        TreeContextEntry(
+                            depth=depth,
+                            node_id=node.id,
+                            description=node.description,
+                            status="FAILED",
+                            type_label="",
+                            marker_expand=node.id == self.id,
+                        )
+                    )
+                return
+
+            type_label = node.type.name if node.type in {NodeType.AND, NodeType.OR} else ""
+            entries.append(
+                TreeContextEntry(
+                    depth=depth,
+                    node_id=node.id,
+                    description=node.description,
+                    status=node.status.name,
+                    type_label=type_label,
+                    marker_expand=node.id == self.id,
+                    action_error=node.action_error,
+                )
+            )
+
+            if node.id in ancestor_ids:
+                is_or = node.type == NodeType.OR
+                for child in node.children:
+                    _render(child, depth + 1, show_deleted_as_failed=is_or)
+
+        _render(root, 0)
+        return entries

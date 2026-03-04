@@ -674,13 +674,8 @@ answer:
         for child_text in children:
             if not isinstance(child_text, str):
                 continue
-            score = None
             clean_text = child_text.strip()
-            # if node_type == "OR":
-            #     score, clean_text = self._extract_score(clean_text)
-            child = hpa.Node(
-                type=hpa.NodeType.UNKNOWN, description=clean_text, parent=self.node, score=score
-            )
+            child = hpa.Node(type=hpa.NodeType.UNKNOWN, description=clean_text, parent=self.node)
             self.node.add_child(child)
 
         return ans_dict

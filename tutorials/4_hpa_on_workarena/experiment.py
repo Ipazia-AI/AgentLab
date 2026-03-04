@@ -94,12 +94,14 @@ agent_config.set_reproducibility_mode()
 
 agent_configs = [agent_config]
 benchmark = DEFAULT_BENCHMARKS["workarena_l1"]()
+benchmark = benchmark.subset_from_regexp(column="task_name", regexp="workarena.servicenow.all-menu")
 benchmark.env_args_list = benchmark.env_args_list[:1]
 
 n_jobs = 1  # keep 1 for debugging
 
 if __name__ == "__main__":
     study = Study(agent_configs, benchmark)
+    # study.override_max_steps(30)
     study.run(
         n_jobs=n_jobs,
         parallel_backend="sequential",
