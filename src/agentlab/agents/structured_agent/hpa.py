@@ -197,6 +197,7 @@ class HPA:
         else:
             self.pending_node.status = NodeStatus.FAIL
             self.pending_node.action_error = action_error
+        
 
         self._global_tree_update(
             model_name=model_name,
@@ -356,6 +357,7 @@ class HPA:
                 )
                 continue
             node.status = NodeStatus.DELETED
+            print(f"[PRUNED] Pruned node {node.id}")
         return
 
     def _update_nodes_in_global_tree(
@@ -375,7 +377,11 @@ class HPA:
             node_ids=list(updated_node_ids.keys()), global_tree=global_tree
         )
         for node in nodes_to_update:
+            if node.status != NodeStatus.UNVISITED:
+                print(f"[UPDATE BLOCKED] Refusing to update node {node.id} (status={node.status.name})")
+                continue
             node.description = updated_node_ids[node.id]
+            print(f"[UPDATED] Updated node {node.id} with description: {node.description}")
         return
 
     def _global_tree_update(
@@ -418,10 +424,12 @@ class HPA:
         result = self._call_json_prompt(model_name, system_message, user_message)
         pruned_node_ids = result.get("prune", [])
         updated_node_ids = result.get("update", {})
+        print(f"\n{'='*60}\nTree Update\n{'='*60}\n")
         self._prune_nodes_from_global_tree(pruned_node_ids=pruned_node_ids, global_tree=global_tree)
         self._update_nodes_in_global_tree(
             updated_node_ids=updated_node_ids, global_tree=global_tree
         )
+        print(f"\n{'='*60}")
         return
 
     def _propagate_failure(self, node: Node):
