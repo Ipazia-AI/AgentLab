@@ -42,11 +42,10 @@ class HPA:
         self.retries = 0
 
     def get_action_node(self, expansion_function) -> Node | None:
-        stack_items = self.stack.items
         self.telemetry.reset_for_action()
         while self.retries < self.max_retries:
-            while stack_items:
-                node, state = stack_items.pop()
+            while self.stack.items:
+                node, state = self.stack.items.pop()
 
                 if node.status == NodeStatus.PRUNED:
                     self.stack.propagate_failure(node)
@@ -90,7 +89,7 @@ class HPA:
                 if self._counter >= self.budget:
                     break
 
-            if stack_items or self.stack.completed_nodes:
+            if self.stack.items or self.stack.completed_nodes:
                 self.previous_attempt_summaries.append(self.stack.summary)
             self.retries += 1
             self.stack.clean()
