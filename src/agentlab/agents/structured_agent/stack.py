@@ -7,13 +7,15 @@ class Stack:
 
     def __init__(self, goal: str) -> None:
         self.goal = goal
+        self.root = Node(type=NodeType.UNKNOWN, description=goal)
         self.items: list[tuple[Node, NodeState]] = [
-            (Node(type=NodeType.UNKNOWN, description=goal), NodeState.ENTERING)
+            (self.root, NodeState.ENTERING)
         ]
         self.completed_nodes: list[Node] = []
 
     def clean(self) -> None:
-        self.items = [(Node(type=NodeType.UNKNOWN, description=self.goal), NodeState.ENTERING)]
+        self.root = Node(type=NodeType.UNKNOWN, description=self.goal)
+        self.items = [(self.root, NodeState.ENTERING)]
 
     def process_node_entering(
         self,
@@ -144,11 +146,11 @@ class Stack:
 
     @property
     def summary(self) -> str:
-        root = self.items[0][0] if self.items else None
-        if root is None:
+        #root = self.items[0][0] if self.items else None
+        if self.root is None:
             return
 
-        root_context = root.to_tree_context_entry()
+        root_context = self.root.to_tree_context_entry()
         return "\n".join(entry.format(disable_marker=True) for entry in root_context)
 
     @property
