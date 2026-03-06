@@ -12,10 +12,10 @@ from agentlab.llm.chat_api import OpenRouterModelArgs
 project_dir = Path(__file__).parents[2]
 load_dotenv(project_dir.joinpath(".env"), override=False)
 
-max_total_tokens = 1000 # Change values here!!!!!!
-max_new_tokens = 100 # Change values here!!!!!
+max_total_tokens = 131_072  # Change values here!!!!!!
+max_new_tokens = 40_000  # Change values here!!!!!
 max_input_tokens = max_total_tokens - max_new_tokens
-model_name = ""
+model_name = "google/gemini-3-flash-preview"
 
 chat_model_args = OpenRouterModelArgs(
     model_name=model_name,
@@ -32,21 +32,14 @@ agent_config.set_reproducibility_mode()
 agent_configs = [agent_config]
 
 benchmark = DEFAULT_BENCHMARKS["workarena_l1"]()
-tasks_list = [
-    "workarena.servicenow.all-menu",
-    "workarena.servicenow.filter-hardware-list",
-    "workarena.servicenow.single-chart-value-retrieval",
-    "workarena.servicenow.sort-asset-list",
-]
-benchmark = benchmark.subset_from_list(tasks_list, benchmark_name_suffix="generic_reduced_l1")
 
-n_jobs = 1  # keep 1 for debugging
+n_jobs = 5  # keep 1 for debugging
 
 if __name__ == "__main__":
     study = Study(agent_configs, benchmark)
     study.override_max_steps(30)
     study.run(
         n_jobs=n_jobs,
-        parallel_backend="sequential",
+        parallel_backend="ray",
         n_relaunch=1,
     )
