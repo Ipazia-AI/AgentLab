@@ -10,8 +10,8 @@ from agentlab.agents.generic_agent import (
     AGENT_GPT5_MINI,
     AGENT_4o_MINI,
 )
-from agentlab.agents.generic_agent.generic_agent import GenericAgentArgs
 from agentlab.agents.generic_agent.generic_agent_prompt import GenericPromptFlags
+from agentlab.agents.generic_agent.tmlr_config import BASE_FLAGS
 from agentlab.agents.structured_agent.hpa_agent import HPAAgentArgs
 from agentlab.agents.structured_agent.hpa_prompt import HPAPromptFlags
 from agentlab.experiments.study import Study
@@ -23,40 +23,40 @@ load_dotenv(project_dir.joinpath(".env"), override=False)
 
 prompt_flags = GenericPromptFlags(
     obs=dp.ObsFlags(
-        use_html=False,
-        use_ax_tree=True,
-        use_focused_element=True,
-        use_error_logs=True,
-        use_history=True,
-        use_past_error_logs=False,
-        use_action_history=True,
-        use_think_history=True,
-        use_diff=False,
-        html_type="pruned_html",
-        use_screenshot=False,
-        use_som=False,
-        extract_visible_tag=True,
-        extract_clickable_tag=True,
-        extract_coords="False",
-        filter_visible_elements_only=False,
+        use_html=BASE_FLAGS.obs.use_html,
+        use_ax_tree=BASE_FLAGS.obs.use_ax_tree,
+        use_focused_element=BASE_FLAGS.obs.use_focused_element,
+        use_error_logs=BASE_FLAGS.obs.use_error_logs,
+        use_history=BASE_FLAGS.obs.use_history,
+        use_past_error_logs=BASE_FLAGS.obs.use_past_error_logs,
+        use_action_history=BASE_FLAGS.obs.use_action_history,
+        use_think_history=BASE_FLAGS.obs.use_think_history,
+        use_diff=BASE_FLAGS.obs.use_diff,
+        html_type=BASE_FLAGS.obs.html_type,
+        use_screenshot=BASE_FLAGS.obs.use_screenshot,
+        use_som=BASE_FLAGS.obs.use_som,
+        extract_visible_tag=BASE_FLAGS.obs.extract_visible_tag,
+        extract_clickable_tag=BASE_FLAGS.obs.extract_clickable_tag,
+        extract_coords=BASE_FLAGS.obs.extract_coords,
+        filter_visible_elements_only=BASE_FLAGS.obs.filter_visible_elements_only,
     ),
     action=dp.ActionFlags(
-        multi_actions=False,
-        action_set="bid",
-        long_description=False,
-        individual_examples=False,
+        multi_actions=BASE_FLAGS.action.multi_actions,
+        action_set=BASE_FLAGS.action.action_set,
+        long_description=BASE_FLAGS.action.long_description,
+        individual_examples=BASE_FLAGS.action.individual_examples,
     ),
-    use_plan=False,
-    use_criticise=False,
-    use_thinking=True,
-    use_memory=False,
-    use_concrete_example=True,
-    use_abstract_example=True,
-    use_hints=True,
-    enable_chat=False,
-    max_prompt_tokens=40_000,
-    be_cautious=True,
-    extra_instructions=None,
+    use_plan=BASE_FLAGS.use_plan,
+    use_criticise=BASE_FLAGS.use_criticise,
+    use_thinking=BASE_FLAGS.use_thinking,
+    use_memory=BASE_FLAGS.use_memory,
+    use_concrete_example=BASE_FLAGS.use_concrete_example,
+    use_abstract_example=BASE_FLAGS.use_abstract_example,
+    use_hints=BASE_FLAGS.use_hints,
+    enable_chat=BASE_FLAGS.enable_chat,
+    max_prompt_tokens=BASE_FLAGS.max_prompt_tokens,
+    be_cautious=BASE_FLAGS.be_cautious,
+    extra_instructions=BASE_FLAGS.extra_instructions,
 )
 
 chat_model_args = OpenRouterModelArgs(
