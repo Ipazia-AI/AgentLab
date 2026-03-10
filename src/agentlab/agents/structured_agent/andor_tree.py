@@ -18,9 +18,9 @@ class TreeContextEntry(BaseModel):
     def format(self, disable_marker: bool = False) -> str:
         indent = "  " * self.depth
         status_prefix = ""
-        if self.status == "FAIL":
+        if self.status == "NOT_RECOVERABLE":
             err = f": {self.action_error}" if self.action_error else ""
-            status_prefix = f"[FAIL{err}] "
+            status_prefix = f"[NOT_RECOVERABLE{err}] "
         elif self.status:
             status_prefix = f"[{self.status}] "
         type_label = f" ({self.type_label})" if self.type_label else ""
@@ -41,15 +41,15 @@ class NodeType(Enum):
 
 
 class NodeStatus(Enum):
-    UNVISITED = auto()
-    VISITED = auto()
-    SUCCESS = auto()
-    FAIL = auto()
-    PRUNED = auto()
-    DELETED = auto()
+    UNVISITED = auto()    # Node that was not visited yet
+    VISITED = auto()    # Node that performed an expansion
+    SUCCESS = auto()    # Node that completed successfully
+    RECOVERABLE = auto()    # Node that failed but can be recovered
+    NOT_RECOVERABLE = auto()    # Node that failed and cannot be recovered
+    DELETED = auto()    # Node that was deleted from the tree
 
 
-CLOSED_STATUSES = {NodeStatus.SUCCESS, NodeStatus.DELETED, NodeStatus.PRUNED}
+CLOSED_STATUSES = {NodeStatus.SUCCESS, NodeStatus.DELETED, NodeStatus.NOT_RECOVERABLE}
 
 
 class NodeState(Enum):
@@ -73,6 +73,7 @@ class Node(BaseModel):
 
     revision_count: int = 0
     execution_count: int = 0
+    max_revision_count: int = 3
 
     @property
     def depth(self) -> int:
@@ -96,25 +97,29 @@ class Node(BaseModel):
 
     @property
     def valid_children(self) -> list["Node"]:
-        return [c for c in self.children if c.status not in {NodeStatus.PRUNED, NodeStatus.DELETED}]
+        return [c for c in self.children if c.status not in {NodeStatus.NOT_RECOVERABLE, NodeStatus.DELETED}]
 
     @property
     def successful_children_and(self) -> bool:
-        return all(
-            c.status == NodeStatus.SUCCESS or c.status == NodeStatus.DELETED for c in self.children
-        )
+        # An AND node is successful when all its children are SUCCESS or when at least one child is SUCCESS and the others DELETED
+        if all(c.status == NodeStatus.SUCCESS for c in self.children):
+            return True
+        if any(c.status == NodeStatus.SUCCESS for c in self.children):
+            return all(c.status in {NodeStatus.DELETED, NodeStatus.SUCCESS} for c in self.children)
+        return False
 
     @property
     def successful_children_or(self) -> bool:
+        # An OR node is successful when at least one child is SUCCESS
         return any(c.status == NodeStatus.SUCCESS for c in self.children)
 
     @property
     def valid_children_and(self) -> bool:
-        return all(c.status not in {NodeStatus.PRUNED} for c in self.children)
+        return all(c.status not in {NodeStatus.NOT_RECOVERABLE, NodeStatus.DELETED} for c in self.children)
 
     @property
     def valid_children_or(self) -> bool:
-        return any(c.status not in {NodeStatus.PRUNED, NodeStatus.DELETED} for c in self.children)
+        return any(c.status not in {NodeStatus.NOT_RECOVERABLE, NodeStatus.DELETED} for c in self.children)
 
     def to_dict(self) -> dict:
         return {

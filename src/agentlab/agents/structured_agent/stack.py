@@ -36,7 +36,8 @@ class Stack:
             self.items.append((node, NodeState.EXITING))
             return node
 
-        if node.type == NodeType.AND:
+        elif node.type == NodeType.AND:
+            # TODO: Check if this condition is useful
             if node.successful_children_and:
                 return node
             self.items.append((node, NodeState.EXITING))
@@ -45,9 +46,10 @@ class Stack:
                     if not child.closed:
                         self.items.append((child, NodeState.ENTERING))
             else:
-                node.status = NodeStatus.FAIL
+                node.status = NodeStatus.RECOVERABLE
 
         elif node.type == NodeType.OR:
+            # TODO: Check if this condition is useful
             if node.successful_children_or:
                 return node
             self.items.append((node, NodeState.EXITING))
@@ -55,51 +57,57 @@ class Stack:
                 child = self.select_promising_child(node)
                 self.items.append((child, NodeState.ENTERING))
             else:
-                node.status = NodeStatus.FAIL
+                node.status = NodeStatus.RECOVERABLE
 
         return node
 
     def process_node_exiting(self, node: Node) -> None:
         if node.type == NodeType.ACTION:
             self.completed_nodes.append(node)
-            if node.status in {NodeStatus.FAIL, NodeStatus.PRUNED}:
+            if node.status in {NodeStatus.RECOVERABLE, NodeStatus.NOT_RECOVERABLE}:
                 self.items.append((node, NodeState.FAILED))
 
         elif node.type == NodeType.AND:
-            if node.successful_children_and and self.check_and_complete(node):
+            if node.successful_children_and: #and self.check_and_complete(node):
                 node.status = NodeStatus.SUCCESS
                 return
-            node.status = NodeStatus.FAIL
+            node.status = NodeStatus.RECOVERABLE
             self.items.append((node, NodeState.FAILED))
 
         elif node.type == NodeType.OR:
             if node.successful_children_or:
                 node.status = NodeStatus.SUCCESS
                 return
-            node.status = NodeStatus.FAIL
+            node.status = NodeStatus.RECOVERABLE
             self.items.append((node, NodeState.FAILED))
 
     def process_node_failed(self, node: Node) -> None:
         if node.type == NodeType.ACTION:
-            node.status = NodeStatus.PRUNED
+            node.status = NodeStatus.NOT_RECOVERABLE
             self.propagate_failure(node)
             return
 
         elif node.type == NodeType.AND:
-            if node.successful_children_and and self.check_and_complete(node):
-                node.status = NodeStatus.SUCCESS
+            if node.valid_children_and:
+                node.status = NodeStatus.VISITED
+                self.items.append((node, NodeState.ENTERING))
                 return
-            if not node.valid_children:
-                node.status = NodeStatus.PRUNED
-                self.propagate_failure(node)
+            
 
         elif node.type == NodeType.OR:
             if node.valid_children_or:
                 node.status = NodeStatus.VISITED
                 self.items.append((node, NodeState.ENTERING))
                 return
-            node.status = NodeStatus.PRUNED
-            self.propagate_failure(node)
+        
+        if node.revision_count < node.max_revision_count:
+            node.revision_count += 1
+            node.status = NodeStatus.RECOVERABLE
+            self.items.append((node, NodeState.ENTERING))
+            return
+        
+        node.status = NodeStatus.NOT_RECOVERABLE
+        self.propagate_failure(node)
 
     def select_promising_child(self, node: Node) -> Node:
         valid_children = node.valid_children
@@ -124,8 +132,8 @@ class Stack:
             for sibling in parent.children:
                 mark_deleted_subtree(sibling, deleted_ids)
 
-            if parent.status not in {NodeStatus.PRUNED, NodeStatus.DELETED}:
-                parent.status = NodeStatus.FAIL
+            if parent.status not in {NodeStatus.NOT_RECOVERABLE, NodeStatus.DELETED}:
+                parent.status = NodeStatus.RECOVERABLE
 
         elif parent.type == NodeType.OR:
             node.status = NodeStatus.DELETED

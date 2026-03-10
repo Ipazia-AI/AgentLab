@@ -47,7 +47,7 @@ class HPA:
             while self.stack.items:
                 node, state = self.stack.items.pop()
 
-                if node.status == NodeStatus.PRUNED:
+                if node.status == NodeStatus.NOT_RECOVERABLE:
                     self.stack.propagate_failure(node)
                     continue
 
@@ -107,7 +107,7 @@ class HPA:
         if action_error == "":
             self.pending_node.status = NodeStatus.SUCCESS
         else:
-            self.pending_node.status = NodeStatus.FAIL
+            self.pending_node.status = NodeStatus.NOT_RECOVERABLE
             self.pending_node.action_error = action_error
         self.telemetry.set_action_outcome(self.pending_node.status)
 

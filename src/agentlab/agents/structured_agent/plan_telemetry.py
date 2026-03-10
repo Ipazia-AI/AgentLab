@@ -64,7 +64,7 @@ class PlanTelemetry:
                         [
                             c
                             for c in expansion.expanded_node.children
-                            if c.status == NodeStatus.PRUNED
+                            if c.status == NodeStatus.NOT_RECOVERABLE
                         ]
                     ),
                     "selected_child_id": selected_child_id,
