@@ -120,6 +120,10 @@ class Node(BaseModel):
     @property
     def valid_children_or(self) -> bool:
         return any(c.status not in {NodeStatus.NOT_RECOVERABLE, NodeStatus.DELETED} for c in self.children)
+    
+    @property
+    def all_deleted_children(self) -> bool:
+        return all(c.status == NodeStatus.DELETED for c in self.children)
 
     def to_dict(self) -> dict:
         return {

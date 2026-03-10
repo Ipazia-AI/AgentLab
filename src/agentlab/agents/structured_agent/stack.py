@@ -36,28 +36,31 @@ class Stack:
             self.items.append((node, NodeState.EXITING))
             return node
 
-        elif node.type == NodeType.AND:
-            # TODO: Check if this condition is useful
-            if node.successful_children_and:
+        elif node.type in {NodeType.AND, NodeType.OR}:
+            if node.all_deleted_children:
+                node.status = NodeStatus.DELETED
                 return node
-            self.items.append((node, NodeState.EXITING))
-            if node.valid_children_and:
-                for child in reversed(node.children):
-                    if not child.closed:
-                        self.items.append((child, NodeState.ENTERING))
-            else:
-                node.status = NodeStatus.RECOVERABLE
 
-        elif node.type == NodeType.OR:
-            # TODO: Check if this condition is useful
-            if node.successful_children_or:
-                return node
-            self.items.append((node, NodeState.EXITING))
-            if node.valid_children_or:
-                child = self.select_promising_child(node)
-                self.items.append((child, NodeState.ENTERING))
-            else:
-                node.status = NodeStatus.RECOVERABLE
+            if node.type == NodeType.AND:
+                if node.successful_children_and:
+                    return node
+                self.items.append((node, NodeState.EXITING))
+                if node.valid_children_and:
+                    for child in reversed(node.children):
+                        if not child.closed:
+                            self.items.append((child, NodeState.ENTERING))
+                else:
+                    node.status = NodeStatus.RECOVERABLE
+
+            else:  # OR
+                if node.successful_children_or:
+                    return node
+                self.items.append((node, NodeState.EXITING))
+                if node.valid_children_or:
+                    child = self.select_promising_child(node)
+                    self.items.append((child, NodeState.ENTERING))
+                else:
+                    node.status = NodeStatus.RECOVERABLE
 
         return node
 
