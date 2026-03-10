@@ -118,33 +118,34 @@ class Stack:
         if parent is None:
             return
 
+        PRESERVED_STATUSES = {NodeStatus.SUCCESS, NodeStatus.NOT_RECOVERABLE}
+
         def mark_deleted_subtree(n: Node, deleted_ids: set):
-            if n.status == NodeStatus.DELETED:
-                deleted_ids.add(n.id)
-            else:
+            if n.status in PRESERVED_STATUSES:
+                return
+            if n.status != NodeStatus.DELETED:
                 n.status = NodeStatus.DELETED
-                deleted_ids.add(n.id)
-            for c in getattr(n, "children", []) or []:
+            deleted_ids.add(n.id)
+            for c in n.children:
                 mark_deleted_subtree(c, deleted_ids)
 
         deleted_ids: set = set()
-        if parent.type == NodeType.AND and parent.children:
+
+        if parent.type == NodeType.AND:
             for sibling in parent.children:
                 mark_deleted_subtree(sibling, deleted_ids)
 
-            if parent.status not in {NodeStatus.NOT_RECOVERABLE, NodeStatus.DELETED}:
-                parent.status = NodeStatus.RECOVERABLE
-
         elif parent.type == NodeType.OR:
-            node.status = NodeStatus.DELETED
-            deleted_ids.add(node.id)
             mark_deleted_subtree(node, deleted_ids)
 
         else:
-            raise ValueError(f"Unexpected node type: {node.type}")
+            raise ValueError(f"Unexpected parent type: {parent.type}")
 
         if deleted_ids:
             self.items = [(n, st) for (n, st) in self.items if n.id not in deleted_ids]
+
+        if parent.status not in {NodeStatus.NOT_RECOVERABLE, NodeStatus.DELETED}:
+            parent.status = NodeStatus.RECOVERABLE
 
     def check_and_complete(self, node: Node) -> bool:
         valid_children = node.valid_children
