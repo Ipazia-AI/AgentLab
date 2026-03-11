@@ -20,7 +20,7 @@ class TreeContextEntry(BaseModel):
         status_prefix = ""
         if self.status == "NOT_RECOVERABLE":
             err = f": {self.action_error}" if self.action_error else ""
-            status_prefix = f"[NOT_RECOVERABLE{err}] "
+            status_prefix = f"[NOT_RECOVERABLE: {err}] "
         elif self.status:
             status_prefix = f"[{self.status}] "
         type_label = f" ({self.type_label})" if self.type_label else ""
@@ -83,6 +83,11 @@ class Node(BaseModel):
     def add_child(self, child: "Node"):
         child.id = self.id + f".{len(self.children)+1}"
         self.children.append(child)
+        
+    def discard_useless_children(self):
+        for child in self.children:
+            if child.status == NodeStatus.NOT_RECOVERABLE:
+                child.status = NodeStatus.DELETED
 
     def __str__(self) -> str:
         return f"Node(id={self.id}, type={self.type.name}, status={self.status.name}, description={self.description}, action={self.action}, action_error={self.action_error}, parent={self.parent.id if self.parent else None}, children={len(self.children)})"
@@ -115,7 +120,7 @@ class Node(BaseModel):
 
     @property
     def valid_children_and(self) -> bool:
-        return all(c.status not in {NodeStatus.NOT_RECOVERABLE, NodeStatus.DELETED} for c in self.children)
+        return all(c.status not in {NodeStatus.NOT_RECOVERABLE} for c in self.children)
 
     @property
     def valid_children_or(self) -> bool:

@@ -79,11 +79,12 @@ Possible Node Types:
 - ACTION Node: Single executable action strictly matching one element of the list of browser actions described below. The action node is a leaf node that represents a single action to be executed on the webpage.
 
 Node status indicators:
-- VISITED: for visited nodes
-- UNVISITED: for unvisited nodes
-- PRUNED: for pruned nodes
-- SUCCESS: for completed nodes 
-- FAIL: for temporarily failed nodes
+- UNVISITED: not yet explored
+- VISITED: expanded into children but not yet completed
+- SUCCESS: completed successfully
+- RECOVERABLE: failed but recovery is in progress
+- NOT_RECOVERABLE: failed permanently and cannot be retried
+- DELETED: removed from the plan (pruned)
 
 Each node has a NODE ACTION field that shows the exact browser command executed for
 ACTION nodes (e.g. click('a1201'), hover('a456')). Use this information to detect when multiple

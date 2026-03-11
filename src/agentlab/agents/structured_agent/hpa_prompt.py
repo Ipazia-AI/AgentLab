@@ -301,7 +301,7 @@ Here follows some information that can help you plan the task:
 ## Plan Context:
 The tree below shows the current plan. Nodes marked [SUCCESS] have succeeded,
 [FAIL] have been tried and failed, [FAILED] are previously attempted strategies
-that did not work, [PRUNED] have been abandoned, and [VISITED] have been
+that did not work, [NOT_RECOVERABLE] have been abandoned, and [VISITED] have been
 partially explored. Only the path to the node being expanded is shown in detail.
 Completed ACTION nodes include an [action: ...] annotation showing the exact
 browser command that was executed.
@@ -620,7 +620,8 @@ while keeping the work that already succeeded.
 {self.children_status}
 
 Children marked [SUCCESS] have completed their work — do NOT regenerate them.
-Children marked [NOT_RECOVERABLE] or [DELETED] have failed and need replacement.
+Children marked [NOT_RECOVERABLE] have failed.
+Children marked [DELETED] have become obsolete or they are no longer needed due to a previous failure.
 
 ## Rules:
 - The node type remains AND. You are generating new ordered subgoals.
@@ -661,13 +662,15 @@ Children marked [NOT_RECOVERABLE] or [DELETED] have failed and need replacement.
         if not isinstance(children, list) or not children:
             raise ParseError("Recovery requires a non-empty 'recovery_expansion' list.")
 
+        self.node.discard_useless_children()
         for child_text in children:
             if not isinstance(child_text, str):
                 continue
             clean_text = child_text.strip()
-            if not clean_text:
+            desc_text = clean_text[clean_text.find(":") + 1:]
+            if not desc_text:
                 continue
-            child = hpa.Node(type=hpa.NodeType.UNKNOWN, description=clean_text, parent=self.node)
+            child = hpa.Node(type=hpa.NodeType.UNKNOWN, description=desc_text, parent=self.node)
             self.node.add_child(child)
 
         return ans_dict

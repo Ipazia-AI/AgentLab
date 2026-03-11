@@ -34,11 +34,13 @@ class Stack:
                 self.propagate_failure(node)
                 return node
             tree_context = get_tree_context(node)
+            print(f"\n{'='*60}\nRecovering node {node.id}\n{'='*60}\n{tree_context}\n{'='*60}\n")
             recovery_function(node, tree_context)
             node.status = NodeStatus.VISITED
 
         elif node.type == NodeType.UNKNOWN:
             tree_context = get_tree_context(node)
+            print(f"\n{'='*60}\nExpanding node {node.id}\n{'='*60}\n{tree_context}\n{'='*60}\n")
             expansion_function(node, tree_context)
             node.status = NodeStatus.VISITED
             on_unknown_expanded(node)
