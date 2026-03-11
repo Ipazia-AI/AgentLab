@@ -50,7 +50,7 @@ class NodeStatus(Enum):
 
 
 CLOSED_STATUSES = {NodeStatus.SUCCESS, NodeStatus.DELETED, NodeStatus.NOT_RECOVERABLE}
-
+PRESERVED_STATUSES = {NodeStatus.SUCCESS, NodeStatus.NOT_RECOVERABLE}
 
 class NodeState(Enum):
     ENTERING = auto()
@@ -124,6 +124,10 @@ class Node(BaseModel):
     @property
     def all_deleted_children(self) -> bool:
         return all(c.status == NodeStatus.DELETED for c in self.children)
+    
+    @property
+    def is_preserved_status(self) -> bool:
+        return self.status in PRESERVED_STATUSES
 
     def to_dict(self) -> dict:
         return {

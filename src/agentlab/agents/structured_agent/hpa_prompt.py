@@ -530,6 +530,241 @@ You should be very concise and to the point, you should not provide any addition
 import agentlab.agents.structured_agent.hpa as hpa
 
 
+class _RecoveryChildrenExpansion(dp.PromptElement):
+    _prompt = ""
+    _abstract_ex = """<recovery_expansion>Provide a list of new subgoals to replace the failed ones. Each subgoal should be on a separate line.</recovery_expansion>"""
+
+    _concrete_ex = ""
+
+    def __init__(self, visible: bool = True):
+        super().__init__(visible=visible)
+
+    def parse_answer(self, text_answer):
+        try:
+            content_dict, valid, retry_message = parse_html_tags(
+                text_answer, keys=["recovery_expansion"], merge_multiple=True
+            )
+            if not valid:
+                return {"recovery_expansion": [], "parse_error": retry_message}
+            else:
+                return {"recovery_expansion": content_dict["recovery_expansion"].split("\n")}
+        except ParseError as e:
+            return {"recovery_expansion": text_answer, "parse_error": str(e)}
+
+
+class _RecoveryReasoning(dp.PromptElement):
+    _prompt = ""
+    _abstract_ex = """<recovery_reasoning>Brief justification explaining why these new subgoals will succeed where the previous ones failed.</recovery_reasoning>"""
+
+    _concrete_ex = ""
+
+    def __init__(self, visible: bool = True):
+        super().__init__(visible=visible)
+
+    def parse_answer(self, text_answer):
+        try:
+            return parse_html_tags_raise(text_answer, keys=["recovery_reasoning"])
+        except ParseError as e:
+            return {"recovery_reasoning": text_answer, "parse_error": str(e)}
+
+
+def _format_children_status(node: hpa.Node) -> str:
+    lines = []
+    for child in node.children:
+        status = child.status.name
+        err = f" (error: {child.action_error})" if child.action_error else ""
+        action = f" [action: {child.action}]" if child.action else ""
+        lines.append(f"  - {child.id} [{status}]{err}: {child.description}{action}")
+    return "\n".join(lines)
+
+
+class AndRecoveryPrompt(dp.Shrinkable):
+    def __init__(
+        self,
+        node: hpa.Node,
+        obs_history: list[dict],
+        constraints: str,
+        progress: str,
+        suggestion: str,
+        tree_context: str,
+        flags: HPAPromptFlags,
+    ):
+        super().__init__()
+        self.node = node
+        self.flags = flags
+        self.children_status = _format_children_status(node)
+        self.hints = PlanningHints(
+            constraints=constraints,
+            progress=progress,
+            suggestion=suggestion,
+            tree_context=tree_context,
+        )
+        self.expansion = _RecoveryChildrenExpansion()
+        self.reasoning = _RecoveryReasoning()
+        self.obs = dp.Observation(obs_history[-1], self.flags.obs)
+
+    @property
+    def _prompt(self) -> HumanMessage:
+        prompt = HumanMessage(
+            f"""
+# AND Node Recovery
+
+The AND node below has failed because one or more of its children could not be completed.
+Your task is to generate NEW replacement children for the failed parts of the plan,
+while keeping the work that already succeeded.
+
+## Node to recover:
+{self.node.prompt_description}
+
+## Current children and their statuses:
+{self.children_status}
+
+Children marked [SUCCESS] have completed their work — do NOT regenerate them.
+Children marked [NOT_RECOVERABLE] or [DELETED] have failed and need replacement.
+
+## Rules:
+- The node type remains AND. You are generating new ordered subgoals.
+- Do NOT duplicate work already done by [SUCCESS] children.
+- Analyze WHY the previous children failed and propose a DIFFERENT approach.
+- New children should complement the successful ones to achieve the overall AND goal.
+- NEVER include element bids (e.g. [a123], [b456]) in node descriptions.
+"""
+        )
+
+        prompt.add_text(
+            f"""\
+{self.obs.prompt}\
+{self.hints.prompt}\
+"""
+        )
+
+        if self.flags.use_abstract_example:
+            prompt.add_text(
+                f"""
+# Abstract Example
+{self.expansion._abstract_ex}\
+{self.reasoning._abstract_ex}\
+"""
+            )
+
+        return self.obs.add_screenshot(prompt)
+
+    def shrink(self):
+        self.obs.shrink()
+
+    def _parse_answer(self, text_answer):
+        ans_dict = {}
+        ans_dict.update(self.expansion.parse_answer(text_answer))
+        ans_dict.update(self.reasoning.parse_answer(text_answer))
+
+        children = ans_dict.get("recovery_expansion", [])
+        if not isinstance(children, list) or not children:
+            raise ParseError("Recovery requires a non-empty 'recovery_expansion' list.")
+
+        for child_text in children:
+            if not isinstance(child_text, str):
+                continue
+            clean_text = child_text.strip()
+            if not clean_text:
+                continue
+            child = hpa.Node(type=hpa.NodeType.UNKNOWN, description=clean_text, parent=self.node)
+            self.node.add_child(child)
+
+        return ans_dict
+
+
+class OrRecoveryPrompt(dp.Shrinkable):
+    def __init__(
+        self,
+        node: hpa.Node,
+        obs_history: list[dict],
+        constraints: str,
+        progress: str,
+        suggestion: str,
+        tree_context: str,
+        flags: HPAPromptFlags,
+    ):
+        super().__init__()
+        self.node = node
+        self.flags = flags
+        self.children_status = _format_children_status(node)
+        self.hints = PlanningHints(
+            constraints=constraints,
+            progress=progress,
+            suggestion=suggestion,
+            tree_context=tree_context,
+        )
+        self.expansion = _RecoveryChildrenExpansion()
+        self.reasoning = _RecoveryReasoning()
+        self.obs = dp.Observation(obs_history[-1], self.flags.obs)
+
+    @property
+    def _prompt(self) -> HumanMessage:
+        prompt = HumanMessage(
+            f"""
+# OR Node Recovery
+
+The OR node below has exhausted all its alternative strategies — none succeeded.
+Your task is to propose NEW alternative strategies that differ from the ones already tried.
+
+## Node to recover:
+{self.node.prompt_description}
+
+## Previously attempted strategies and their outcomes:
+{self.children_status}
+
+All previous alternatives have failed. You must propose DIFFERENT approaches.
+
+## Rules:
+- The node type remains OR. You are generating new alternative strategies.
+- Analyze WHY each previous strategy failed and avoid repeating the same mistakes.
+- Each new alternative should represent a genuinely different approach.
+- NEVER include element bids (e.g. [a123], [b456]) in node descriptions.
+"""
+        )
+
+        prompt.add_text(
+            f"""\
+{self.obs.prompt}\
+{self.hints.prompt}\
+"""
+        )
+
+        if self.flags.use_abstract_example:
+            prompt.add_text(
+                f"""
+# Abstract Example
+{self.expansion._abstract_ex}\
+{self.reasoning._abstract_ex}\
+"""
+            )
+
+        return self.obs.add_screenshot(prompt)
+
+    def shrink(self):
+        self.obs.shrink()
+
+    def _parse_answer(self, text_answer):
+        ans_dict = {}
+        ans_dict.update(self.expansion.parse_answer(text_answer))
+        ans_dict.update(self.reasoning.parse_answer(text_answer))
+
+        children = ans_dict.get("recovery_expansion", [])
+        if not isinstance(children, list) or not children:
+            raise ParseError("Recovery requires a non-empty 'recovery_expansion' list.")
+
+        for child_text in children:
+            if not isinstance(child_text, str):
+                continue
+            clean_text = child_text.strip()
+            if not clean_text:
+                continue
+            child = hpa.Node(type=hpa.NodeType.UNKNOWN, description=clean_text, parent=self.node)
+            self.node.add_child(child)
+
+        return ans_dict
+
+
 class PlanningPrompt(dp.Shrinkable):
     def __init__(
         self,

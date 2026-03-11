@@ -21,12 +21,23 @@ class Stack:
         self,
         node: Node,
         expansion_function,
+        recovery_function,
         get_tree_context,
         on_unknown_expanded,
     ) -> Node:
         node.execution_count += 1
 
-        if node.type == NodeType.UNKNOWN:
+        if node.status == NodeStatus.RECOVERABLE:
+            node.revision_count += 1
+            if node.revision_count > node.max_revision_count:
+                node.status = NodeStatus.NOT_RECOVERABLE
+                self.propagate_failure(node)
+                return node
+            tree_context = get_tree_context(node)
+            recovery_function(node, tree_context)
+            node.status = NodeStatus.VISITED
+
+        elif node.type == NodeType.UNKNOWN:
             tree_context = get_tree_context(node)
             expansion_function(node, tree_context)
             node.status = NodeStatus.VISITED
@@ -37,7 +48,7 @@ class Stack:
             return node
 
         elif node.type in {NodeType.AND, NodeType.OR}:
-            if node.all_deleted_children:
+            if node.children and node.all_deleted_children:
                 node.status = NodeStatus.DELETED
                 return node
 
@@ -70,18 +81,19 @@ class Stack:
             if node.status in {NodeStatus.RECOVERABLE, NodeStatus.NOT_RECOVERABLE}:
                 self.items.append((node, NodeState.FAILED))
 
-        elif node.type == NodeType.AND:
-            if node.successful_children_and: #and self.check_and_complete(node):
+        elif node.type in {NodeType.AND, NodeType.OR}:
+            is_success = False
+            if node.type == NodeType.AND:
+                is_success = node.successful_children_and
+            elif node.type == NodeType.OR:
+                is_success = node.successful_children_or
+                
+            if is_success:
                 node.status = NodeStatus.SUCCESS
                 return
-            node.status = NodeStatus.RECOVERABLE
-            self.items.append((node, NodeState.FAILED))
-
-        elif node.type == NodeType.OR:
-            if node.successful_children_or:
-                node.status = NodeStatus.SUCCESS
-                return
-            node.status = NodeStatus.RECOVERABLE
+            
+            if node.status != NodeStatus.RECOVERABLE:
+                node.status = NodeStatus.RECOVERABLE
             self.items.append((node, NodeState.FAILED))
 
     def process_node_failed(self, node: Node) -> None:
@@ -90,27 +102,9 @@ class Stack:
             self.propagate_failure(node)
             return
 
-        elif node.type == NodeType.AND:
-            if node.valid_children_and:
-                node.status = NodeStatus.VISITED
-                self.items.append((node, NodeState.ENTERING))
-                return
-            
-
-        elif node.type == NodeType.OR:
-            if node.valid_children_or:
-                node.status = NodeStatus.VISITED
-                self.items.append((node, NodeState.ENTERING))
-                return
-        
-        if node.revision_count < node.max_revision_count:
-            node.revision_count += 1
+        if node.status != NodeStatus.RECOVERABLE:
             node.status = NodeStatus.RECOVERABLE
-            self.items.append((node, NodeState.ENTERING))
-            return
-        
-        node.status = NodeStatus.NOT_RECOVERABLE
-        self.propagate_failure(node)
+        self.items.append((node, NodeState.ENTERING))
 
     def select_promising_child(self, node: Node) -> Node:
         valid_children = node.valid_children
@@ -121,10 +115,8 @@ class Stack:
         if parent is None:
             return
 
-        PRESERVED_STATUSES = {NodeStatus.SUCCESS, NodeStatus.NOT_RECOVERABLE}
-
         def mark_deleted_subtree(n: Node, deleted_ids: set):
-            if n.status in PRESERVED_STATUSES:
+            if n.is_preserved_status:
                 return
             if n.status != NodeStatus.DELETED:
                 n.status = NodeStatus.DELETED

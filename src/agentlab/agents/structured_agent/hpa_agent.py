@@ -7,12 +7,15 @@ from agentlab.agents import dynamic_prompting as dp
 from agentlab.agents.generic_agent.generic_agent import GenericAgent, GenericAgentArgs
 from agentlab.agents.structured_agent.analyze import format_hpa_plan_markdown
 from agentlab.agents.structured_agent.hpa_prompt import (
+    AndRecoveryPrompt,
     HPAPromptFlags,
     InsightPrompt,
+    OrRecoveryPrompt,
     PlanningPrompt,
     SystemInsightPrompt,
     SystemPlanningPrompt,
 )
+from agentlab.agents.structured_agent.andor_tree import NodeType
 from agentlab.agents.structured_agent.structured_agent_prompt import MainPrompt
 from agentlab.llm.base_api import BaseModelArgs
 from agentlab.llm.llm_utils import (
@@ -96,7 +99,7 @@ class HPAAgent(GenericAgent):
             self.pending_action_node = None
 
         self._infer_insight()
-        self.pending_action_node = self.hpa.get_action_node(self._infer_plan)
+        self.pending_action_node = self.hpa.get_action_node(self._infer_plan, self._infer_recovery)
         plan_info = self.hpa.get_telemetry(step_index=len(self.actions))
         markdown_page = format_hpa_plan_markdown(plan_info)
 
@@ -147,6 +150,27 @@ class HPAAgent(GenericAgent):
                 actions=self.actions,
                 memories=self.memories,
                 thoughts=self.thoughts,
+                constraints=self.constraints,
+                progress=self.progress,
+                suggestion=self.suggestion,
+                tree_context=tree_context,
+                flags=self.flags,
+            ),
+            SystemMessage(SystemPlanningPrompt().prompt),
+        )
+
+    def _infer_recovery(self, node: Node, tree_context: str):
+        if node.type == NodeType.AND:
+            prompt_cls = AndRecoveryPrompt
+        elif node.type == NodeType.OR:
+            prompt_cls = OrRecoveryPrompt
+        else:
+            raise ValueError(f"Recovery not supported for node type: {node.type}")
+
+        self._infer(
+            prompt_cls(
+                node=node,
+                obs_history=self.obs_history,
                 constraints=self.constraints,
                 progress=self.progress,
                 suggestion=self.suggestion,

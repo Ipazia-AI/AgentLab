@@ -41,7 +41,7 @@ class HPA:
         self.telemetry = PlanTelemetry(self.stack)
         self.retries = 0
 
-    def get_action_node(self, expansion_function) -> Node | None:
+    def get_action_node(self, expansion_function, recovery_function) -> Node | None:
         self.telemetry.reset_for_action()
         while True:
             while self.stack.items:
@@ -73,6 +73,7 @@ class HPA:
                     self.pending_node = self.stack.process_node_entering(
                         node=node,
                         expansion_function=expansion_function,
+                        recovery_function=recovery_function,
                         get_tree_context=self.get_tree_context,
                         on_unknown_expanded=on_unknown_expanded,
                     )
