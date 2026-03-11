@@ -299,17 +299,18 @@ Here follows some information that can help you plan the task:
 ## Suggestion: {suggestion}
 
 ## Plan Context:
-The tree below shows the current plan. Nodes marked [SUCCESS] have succeeded,
-[FAIL] have been tried and failed, [FAILED] are previously attempted strategies
-that did not work, [NOT_RECOVERABLE] have been abandoned, and [VISITED] have been
-partially explored. Only the path to the node being expanded is shown in detail.
-Completed ACTION nodes include an [action: ...] annotation showing the exact
-browser command that was executed.
+The tree below shows the current plan. Node status indicators:
+- [UNVISITED]: not yet explored
+- [VISITED]: expanded into children but not yet completed
+- [SUCCESS]: completed successfully
+- [RECOVERABLE]: failed but recovery is in progress (new children being generated)
+- [NOT_RECOVERABLE]: failed permanently and cannot be retried
+- [DELETED]: a previously attempted alternative under an OR node that did not work
 
 IMPORTANT:
 - DO NOT duplicate work covered by sibling nodes.
-- Analyze [FAILED] nodes carefully and propose a DIFFERENT strategy.
-- If previous failed attempts are listed, avoid repeating the same approach.
+- Analyze [NOT_RECOVERABLE] nodes carefully and propose a DIFFERENT strategy.
+- If previous [NOT_RECOVERABLE] nodes are listed, avoid repeating the same approach.
 - Examine the [action: ...] annotations on completed nodes to understand what
   concrete actions were already attempted. If multiple nodes executed the same
   action without progress, do NOT plan another node that would repeat it.

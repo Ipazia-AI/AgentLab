@@ -158,22 +158,7 @@ class Node(BaseModel):
 
         entries: list[TreeContextEntry] = []
 
-        def _render(node: Node, depth: int, show_deleted_as_failed: bool = False) -> None:
-            if node.status == NodeStatus.DELETED:
-                if show_deleted_as_failed:
-                    entries.append(
-                        TreeContextEntry(
-                            depth=depth,
-                            node_id=node.id,
-                            description=node.description,
-                            action=node.action,
-                            status="FAILED",
-                            type_label="",
-                            marker_expand=node.id == self.id,
-                        )
-                    )
-                return
-
+        def _render(node: Node, depth: int) -> None:
             entries.append(
                 TreeContextEntry(
                     depth=depth,
@@ -188,9 +173,8 @@ class Node(BaseModel):
             )
 
             if node.id in ancestor_ids:
-                is_or = node.type == NodeType.OR
                 for child in node.children:
-                    _render(child, depth + 1, show_deleted_as_failed=is_or)
+                    _render(child, depth + 1)
 
         _render(root, 0)
         return entries

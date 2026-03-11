@@ -111,7 +111,7 @@ UPDATE the description of the nodes to set the new goal of the node based on the
 
 ## IMPORTANT RULES:
     ### PRUNING RULES:
-        - You are only allowed to PRUNE nodes which status is not DELETED, PRUNED, or SUCCESS. 
+        - You are only allowed to PRUNE nodes which status is UNVISITED. 
         - NEVER prune UNVISITED or VISITED children of OR nodes — they are untried alternatives that
         must be preserved as fallback strategies. The tree traversal logic will try them if needed.
         - NEVER prune nodes with SUCCESS status.
