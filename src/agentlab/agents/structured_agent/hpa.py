@@ -135,8 +135,8 @@ class HPA:
             search_counter=self._counter,
         )
 
-    def get_tree_context(self, expanding_node: Node) -> str:
-        lines = [e.format() for e in expanding_node.to_tree_context_entry()]
+    def get_tree_context(self, expanding_node: Node, show_deleted: bool = False) -> str:
+        lines = [e.format() for e in expanding_node.to_tree_context_entry(show_deleted)]
         if self.previous_attempt_summaries:
             lines.append("\n## Previous Failed Attempts:")
             for i, summary in enumerate(self.previous_attempt_summaries):

@@ -305,7 +305,7 @@ The tree below shows the current plan. Node status indicators:
 - [SUCCESS]: completed successfully
 - [RECOVERABLE]: failed but recovery is in progress (new children being generated)
 - [NOT_RECOVERABLE]: failed permanently and cannot be retried
-- [DELETED]: a previously attempted alternative under an OR node that did not work
+- [DELETED]: a node that was deleted from the plan because of pruning or because a previous node failed
 
 IMPORTANT:
 - DO NOT duplicate work covered by sibling nodes.
@@ -533,7 +533,9 @@ import agentlab.agents.structured_agent.hpa as hpa
 
 class _RecoveryChildrenExpansion(dp.PromptElement):
     _prompt = ""
-    _abstract_ex = """<recovery_expansion>Provide a list of new subgoals to replace the failed ones. Each subgoal should be on a separate line.</recovery_expansion>"""
+    _abstract_ex = """<recovery_expansion>
+    Provide a list of new subgoals to replace the failed ones. Each subgoal should be on a separate line.
+    </recovery_expansion>"""
 
     _concrete_ex = ""
 
@@ -555,7 +557,9 @@ class _RecoveryChildrenExpansion(dp.PromptElement):
 
 class _RecoveryReasoning(dp.PromptElement):
     _prompt = ""
-    _abstract_ex = """<recovery_reasoning>Brief justification explaining why these new subgoals will succeed where the previous ones failed.</recovery_reasoning>"""
+    _abstract_ex = """<recovery_reasoning>
+    Brief justification explaining why these new subgoals will succeed where the previous ones failed.
+    </recovery_reasoning>"""
 
     _concrete_ex = ""
 
@@ -574,8 +578,14 @@ def _format_children_status(node: hpa.Node) -> str:
     for child in node.children:
         status = child.status.name
         err = f" (error: {child.action_error})" if child.action_error else ""
-        action = f" [action: {child.action}]" if child.action else ""
-        lines.append(f"  - {child.id} [{status}]{err}: {child.description}{action}")
+        if child.action:
+            action = f" [action: {child.action}"
+            if child.action_error:
+                action += f" (error: {child.action_error})"
+            action += "]"
+        else:
+            action = ""
+        lines.append(f"{child.id} [{status}]: {child.description}{action}")
     return "\n".join(lines)
 
 
@@ -629,7 +639,12 @@ Children marked [DELETED] have become obsolete or they are no longer needed due 
 - Do NOT duplicate work already done by [SUCCESS] children.
 - Analyze WHY the previous children failed and propose a DIFFERENT approach.
 - New children should complement the successful ones to achieve the overall AND goal.
-- NEVER include element bids (e.g. [a123], [b456]) in node descriptions.
+- NEVER include element bids (e.g. [a123], [b456]) in node descriptions. Bids are ephemeral
+  and change on every page update. Describe elements by their visible label, role, or position
+  (e.g. "Click the 'View chart menu' button" NOT "Click bid [a960]").
+  Note: completed ACTION nodes in the Plan Context show [action: ...] annotations with
+  historical bids. Use these only to detect repeated actions, NOT to copy bids into new
+  node descriptions.
 """
         )
 
@@ -644,7 +659,7 @@ Children marked [DELETED] have become obsolete or they are no longer needed due 
             prompt.add_text(
                 f"""
 # Abstract Example
-{self.expansion._abstract_ex}\
+{self.expansion._abstract_ex}\n\
 {self.reasoning._abstract_ex}\
 """
             )

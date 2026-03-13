@@ -18,9 +18,9 @@ class TreeContextEntry(BaseModel):
     def format(self, disable_marker: bool = False) -> str:
         indent = "  " * self.depth
         status_prefix = ""
-        if self.status == "NOT_RECOVERABLE":
-            err = f": {self.action_error}" if self.action_error else ""
-            status_prefix = f"[NOT_RECOVERABLE: {err}] "
+        if self.status == "FAILED":
+            #err = f": {self.action_error}" if self.action_error else ""
+            status_prefix = "[FAILED] "
         elif self.status:
             status_prefix = f"[{self.status}] "
         type_label = f" ({self.type_label})" if self.type_label else ""
@@ -28,7 +28,10 @@ class TreeContextEntry(BaseModel):
 
         action_suffix = ""
         if self.action and self.type_label == NodeType.ACTION.name:
-            action_suffix = f"  [action: {self.action}]"
+            if self.action_error:
+                action_suffix = f"  [action: {self.action} (error: {self.action_error})]"
+            else:
+                action_suffix = f"  [action: {self.action}]"
 
         return f"{indent}{status_prefix}{self.node_id}{type_label}: {self.description}{action_suffix}{marker}"
 
@@ -145,7 +148,7 @@ class Node(BaseModel):
             "parent_type": None if self.parent is None else self.parent.type.name,
         }
 
-    def to_tree_context_entry(self) -> list[TreeContextEntry]:
+    def to_tree_context_entry(self, show_deleted: bool = False) -> list[TreeContextEntry]:
         ancestor_ids: set[str] = set()
         current = self
         while current is not None:
@@ -158,7 +161,24 @@ class Node(BaseModel):
 
         entries: list[TreeContextEntry] = []
 
-        def _render(node: Node, depth: int) -> None:
+        def _render(node: Node, depth: int, show_deleted: bool = False) -> None:
+            if node.status == NodeStatus.DELETED:
+                if not show_deleted:
+                    return
+                elif node.action_error:
+                    entries.append(
+                    TreeContextEntry(
+                        depth=depth,
+                        node_id=node.id,
+                        description=node.description,
+                        action=node.action,
+                        status="FAILED",
+                        type_label=node.type.name,
+                        marker_expand=node.id == self.id,
+                        action_error=node.action_error,
+                    )
+                )
+                return
             entries.append(
                 TreeContextEntry(
                     depth=depth,
@@ -174,9 +194,9 @@ class Node(BaseModel):
 
             if node.id in ancestor_ids:
                 for child in node.children:
-                    _render(child, depth + 1)
+                    _render(child, depth + 1, show_deleted)
 
-        _render(root, 0)
+        _render(root, 0, show_deleted)
         return entries
 
 
