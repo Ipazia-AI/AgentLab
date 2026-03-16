@@ -102,14 +102,22 @@ class HPA:
         progress: str,
         suggestion: str,
         obs_history: list[dict],
+        verification_function=None,
     ) -> dict:
         action_error = obs_history[-1].get("last_action_error", "")
 
-        if action_error == "":
-            self.pending_node.status = NodeStatus.SUCCESS
-        else:
+        if action_error:
             self.pending_node.status = NodeStatus.NOT_RECOVERABLE
             self.pending_node.action_error = action_error
+        elif verification_function is not None:
+            is_success, explanation = verification_function(self.pending_node)
+            if is_success:
+                self.pending_node.status = NodeStatus.SUCCESS
+            else:
+                self.pending_node.status = NodeStatus.NOT_RECOVERABLE
+                self.pending_node.action_error = explanation
+        else:
+            self.pending_node.status = NodeStatus.SUCCESS
         self.telemetry.set_action_outcome(self.pending_node.status)
 
         result = self.tree_update_engine.apply(

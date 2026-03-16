@@ -528,6 +528,75 @@ Each time you provide a plan it will be used as a guide for planning the next ac
 You should be very concise and to the point, you should not provide any additional information that is not related to the task."""
 
 
+class ActionVerificationPrompt(dp.Shrinkable):
+    def __init__(
+        self,
+        action_description: str,
+        obs_history: list[dict],
+        flags: HPAPromptFlags,
+    ):
+        super().__init__()
+        self.action_description = action_description
+        self.flags = flags
+        self.obs = dp.Observation(obs_history[-1], self.flags.obs)
+
+    @property
+    def _prompt(self) -> HumanMessage:
+        prompt = HumanMessage(
+            f"""
+# Action Verification
+
+An action was just executed on the webpage. Your task is to determine whether the
+action's goal was actually fulfilled based on the current state of the page.
+
+## Action goal:
+{self.action_description}
+
+## Rules:
+- Examine the current page state carefully to determine if the goal was achieved.
+- The action may have executed without errors but still not achieved its intended goal
+  (e.g. clicking a button that didn't navigate to the expected page).
+- Be strict: if the goal is not clearly fulfilled, report FAILURE.
+"""
+        )
+
+        prompt.add_text(f"{self.obs.prompt}")
+
+        prompt.add_text(
+            """
+# Answer format
+
+<verification_result>SUCCESS or FAILURE</verification_result>
+<verification_explanation>Brief explanation of why the action goal was or was not fulfilled.</verification_explanation>
+"""
+        )
+
+        return self.obs.add_screenshot(prompt)
+
+    def shrink(self):
+        self.obs.shrink()
+
+    def _parse_answer(self, text_answer):
+        ans_dict = parse_html_tags_raise(
+            text_answer,
+            keys=["verification_result", "verification_explanation"],
+        )
+        result = ans_dict.get("verification_result", "").strip().upper()
+        if result not in {"SUCCESS", "FAILURE"}:
+            raise ParseError(
+                "verification_result must be exactly 'SUCCESS' or 'FAILURE'."
+            )
+        ans_dict["verification_result"] = result
+        return ans_dict
+
+
+class SystemActionVerificationPrompt(dp.PromptElement):
+    _prompt = """\
+You are a verification agent that checks whether a browser action achieved its intended goal.
+You examine the current state of the webpage after the action was executed and determine
+if the action's objective was fulfilled. Be concise and precise."""
+
+
 import agentlab.agents.structured_agent.hpa as hpa
 
 
@@ -577,16 +646,13 @@ def _format_children_status(node: hpa.Node) -> str:
     lines = []
     for child in node.children:
         status = child.status.name
-        err = f" (error: {child.action_error})" if child.action_error else ""
+        parts = [f"[{status}] {child.description}"]
         if child.action:
-            action = f" [action: {child.action}"
-            if child.action_error:
-                action += f" (error: {child.action_error})"
-            action += "]"
-        else:
-            action = ""
-        lines.append(f"{child.id} [{status}]: {child.description}{action}")
-    return "\n".join(lines)
+            parts.append(f"  action executed: {child.action}")
+        if child.action_error:
+            parts.append(f"  FAILURE REASON: {child.action_error}")
+        lines.append("\n".join(parts))
+    return "\n\n".join(lines)
 
 
 class AndRecoveryPrompt(dp.Shrinkable):
@@ -631,20 +697,21 @@ while keeping the work that already succeeded.
 {self.children_status}
 
 Children marked [SUCCESS] have completed their work — do NOT regenerate them.
-Children marked [NOT_RECOVERABLE] have failed.
-Children marked [DELETED] have become obsolete or they are no longer needed due to a previous failure.
+Children marked [NOT_RECOVERABLE] have failed permanently — read their FAILURE REASON carefully.
+Children marked [DELETED] were invalidated by a sibling failure.
+
+## CRITICAL — Failure Analysis:
+Read every FAILURE REASON above. You MUST propose a fundamentally different approach
+that avoids the exact same issue. If a click didn't open a dropdown, try a different
+interaction method (e.g. type into the field, use keyboard navigation, click a different
+element). Simply rephrasing the same action is NOT acceptable.
 
 ## Rules:
 - The node type remains AND. You are generating new ordered subgoals.
 - Do NOT duplicate work already done by [SUCCESS] children.
-- Analyze WHY the previous children failed and propose a DIFFERENT approach.
 - New children should complement the successful ones to achieve the overall AND goal.
-- NEVER include element bids (e.g. [a123], [b456]) in node descriptions. Bids are ephemeral
-  and change on every page update. Describe elements by their visible label, role, or position
-  (e.g. "Click the 'View chart menu' button" NOT "Click bid [a960]").
-  Note: completed ACTION nodes in the Plan Context show [action: ...] annotations with
-  historical bids. Use these only to detect repeated actions, NOT to copy bids into new
-  node descriptions.
+- Do NOT include node IDs (e.g. 0.2.1.1) in your descriptions.
+- NEVER include element bids (e.g. [a123], [b456]) in node descriptions.
 """
         )
 
@@ -678,15 +745,13 @@ Children marked [DELETED] have become obsolete or they are no longer needed due 
         if not isinstance(children, list) or not children:
             raise ParseError("Recovery requires a non-empty 'recovery_expansion' list.")
 
-        self.node.discard_useless_children()
         for child_text in children:
             if not isinstance(child_text, str):
                 continue
             clean_text = child_text.strip()
-            desc_text = clean_text[clean_text.find(":") + 1:]
-            if not desc_text:
+            if not clean_text:
                 continue
-            child = hpa.Node(type=hpa.NodeType.UNKNOWN, description=desc_text, parent=self.node)
+            child = hpa.Node(type=hpa.NodeType.UNKNOWN, description=clean_text, parent=self.node)
             self.node.add_child(child)
 
         return ans_dict
@@ -734,10 +799,16 @@ Your task is to propose NEW alternative strategies that differ from the ones alr
 
 All previous alternatives have failed. You must propose DIFFERENT approaches.
 
+## CRITICAL — Failure Analysis:
+Read every FAILURE REASON above. Each new strategy MUST use a fundamentally different
+approach that avoids the same failure modes. If previous strategies failed because of
+a specific interaction method, your new strategies must use entirely different methods.
+Simply rephrasing the same strategy is NOT acceptable.
+
 ## Rules:
 - The node type remains OR. You are generating new alternative strategies.
-- Analyze WHY each previous strategy failed and avoid repeating the same mistakes.
 - Each new alternative should represent a genuinely different approach.
+- Do NOT include node IDs (e.g. 0.2.1.1) in your descriptions.
 - NEVER include element bids (e.g. [a123], [b456]) in node descriptions.
 """
         )

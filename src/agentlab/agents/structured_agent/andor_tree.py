@@ -86,11 +86,6 @@ class Node(BaseModel):
     def add_child(self, child: "Node"):
         child.id = self.id + f".{len(self.children)+1}"
         self.children.append(child)
-        
-    def discard_useless_children(self):
-        for child in self.children:
-            if child.status == NodeStatus.NOT_RECOVERABLE:
-                child.status = NodeStatus.DELETED
 
     def __str__(self) -> str:
         return f"Node(id={self.id}, type={self.type.name}, status={self.status.name}, description={self.description}, action={self.action}, action_error={self.action_error}, parent={self.parent.id if self.parent else None}, children={len(self.children)})"

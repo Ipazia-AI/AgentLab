@@ -7,11 +7,13 @@ from agentlab.agents import dynamic_prompting as dp
 from agentlab.agents.generic_agent.generic_agent import GenericAgent, GenericAgentArgs
 from agentlab.agents.structured_agent.analyze import format_hpa_plan_markdown
 from agentlab.agents.structured_agent.hpa_prompt import (
+    ActionVerificationPrompt,
     AndRecoveryPrompt,
     HPAPromptFlags,
     InsightPrompt,
     OrRecoveryPrompt,
     PlanningPrompt,
+    SystemActionVerificationPrompt,
     SystemInsightPrompt,
     SystemPlanningPrompt,
 )
@@ -88,13 +90,13 @@ class HPAAgent(GenericAgent):
             self.hpa.set_goal(self.obs_history[0])
 
         if self.pending_action_node is not None and isinstance(obs, dict):
-            # To be adjusted to the right observation key depending on how we manage the success result
             self.hpa.complete_action_node(
                 self.chat_model_args.model_name,
                 self.constraints,
                 self.progress,
                 self.suggestion,
                 self.obs_history,
+                verification_function=self._infer_action_verification,
             )
             self.pending_action_node = None
 
@@ -179,6 +181,19 @@ class HPAAgent(GenericAgent):
             ),
             SystemMessage(SystemPlanningPrompt().prompt),
         )
+
+    def _infer_action_verification(self, node: Node) -> tuple[bool, str]:
+        ans_dict, _, _ = self._infer(
+            ActionVerificationPrompt(
+                action_description=node.description,
+                obs_history=self.obs_history,
+                flags=self.flags,
+            ),
+            SystemMessage(SystemActionVerificationPrompt().prompt),
+        )
+        result = ans_dict.get("verification_result", "FAILURE")
+        explanation = ans_dict.get("verification_explanation", "")
+        return result == "SUCCESS", explanation
 
     def _infer_action(self) -> tuple[Discussion, dict]:
 
