@@ -36,6 +36,7 @@ class Stack:
             tree_context = get_tree_context(node)
             print(f"\n{'='*60}\nRecovering node {node.id}\n{'='*60}\n{tree_context}\n{'='*60}\n")
             recovery_function(node, tree_context)
+            node.discard_useless_children()
             node.status = NodeStatus.VISITED
 
         elif node.type == NodeType.UNKNOWN:

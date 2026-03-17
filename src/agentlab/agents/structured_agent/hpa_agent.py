@@ -183,10 +183,15 @@ class HPAAgent(GenericAgent):
         )
 
     def _infer_action_verification(self, node: Node) -> tuple[bool, str]:
+        previous_action = self.actions[-1] if self.actions else None
+        previous_thought = self.thoughts[-1] if self.thoughts else None
+
         ans_dict, _, _ = self._infer(
             ActionVerificationPrompt(
                 action_description=node.description,
                 obs_history=self.obs_history,
+                previous_action=previous_action,
+                previous_thought=previous_thought,
                 flags=self.flags,
             ),
             SystemMessage(SystemActionVerificationPrompt().prompt),

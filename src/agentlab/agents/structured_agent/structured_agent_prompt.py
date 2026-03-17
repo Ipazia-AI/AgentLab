@@ -119,6 +119,8 @@ class MainPrompt(dp.Shrinkable):
 # Current Plan Step:
 {self.current_plan_step}
 
+IMPORTANT: focus on executing the current plan step, do not try to execute other plan steps. Fall back to use some neutral action if the current plan step is not possible to execute or if it is unclear.
+
 NOTE: Plan step descriptions are high-level intent. If they mention specific element bids
 (e.g. [a123]), IGNORE those bids — they are stale. Always find the matching element by its
 label, role, or visible text in the CURRENT AXTree above.

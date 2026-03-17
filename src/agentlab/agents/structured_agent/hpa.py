@@ -120,6 +120,13 @@ class HPA:
             self.pending_node.status = NodeStatus.SUCCESS
         self.telemetry.set_action_outcome(self.pending_node.status)
 
+        print(f"{60*'='}\nAction Verification\n{60*'='}\n")
+        print(f"Action: {self.pending_node.description}")
+        print(f"Previous Action: {self.pending_node.action}")
+        print(f"Error: {self.pending_node.action_error}")
+        print(f"Is Success: {True if self.pending_node.status == NodeStatus.SUCCESS else False}")
+        print(f"{60*'='}\n")
+        
         result = self.tree_update_engine.apply(
             model_name=model_name,
             task_description=self.goal,

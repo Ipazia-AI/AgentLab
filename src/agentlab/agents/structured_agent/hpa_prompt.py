@@ -534,9 +534,13 @@ class ActionVerificationPrompt(dp.Shrinkable):
         action_description: str,
         obs_history: list[dict],
         flags: HPAPromptFlags,
+        previous_action: str | None = None,
+        previous_thought: str | None = None,
     ):
         super().__init__()
         self.action_description = action_description
+        self.previous_action = previous_action
+        self.previous_thought = previous_thought
         self.flags = flags
         self.obs = dp.Observation(obs_history[-1], self.flags.obs)
 
@@ -551,12 +555,31 @@ action's goal was actually fulfilled based on the current state of the page.
 
 ## Action goal:
 {self.action_description}
+"""
+        )
 
+        if self.previous_thought or self.previous_action:
+            prompt.add_text("\n## What was actually done at the previous step:\n")
+            if self.previous_thought:
+                prompt.add_text(f"### Agent reasoning:\n{self.previous_thought}\n")
+            if self.previous_action:
+                prompt.add_text(f"### Action executed:\n{self.previous_action}\n")
+
+        prompt.add_text(
+            """
 ## Rules:
 - Examine the current page state carefully to determine if the goal was achieved.
+- Compare the action that was actually executed and the agent's reasoning against
+  the intended action goal to assess whether the right action was taken.
 - The action may have executed without errors but still not achieved its intended goal
   (e.g. clicking a button that didn't navigate to the expected page).
-- Be strict: if the goal is not clearly fulfilled, report FAILURE.
+- Focus on FUNCTIONAL INTENT, not exact wording. The action goal is a natural-language
+  description written before seeing the page; the actual UI labels may differ slightly
+  (e.g. "is empty" vs "is empty string", "Submit" vs "Save", "Search" vs "Find").
+  As long as the selected option or performed action achieves the same functional
+  purpose described in the goal, report SUCCESS.
+- Report FAILURE only when the outcome clearly contradicts the goal's intent
+  (e.g. wrong item selected, navigation to an unrelated page, no visible effect).
 """
         )
 
@@ -594,7 +617,9 @@ class SystemActionVerificationPrompt(dp.PromptElement):
     _prompt = """\
 You are a verification agent that checks whether a browser action achieved its intended goal.
 You examine the current state of the webpage after the action was executed and determine
-if the action's objective was fulfilled. Be concise and precise."""
+if the action's objective was fulfilled. Judge by functional outcome, not by literal wording:
+if the page state reflects the intended effect, the action succeeded even when UI labels
+differ slightly from the goal description. Be concise and precise."""
 
 
 import agentlab.agents.structured_agent.hpa as hpa
