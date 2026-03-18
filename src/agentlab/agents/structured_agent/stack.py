@@ -13,8 +13,9 @@ class Stack:
         ]
         self.completed_nodes: list[Node] = []
 
-    def clean(self) -> None:
+    def clean(self, retries: int = 0) -> None:
         self.root = Node(type=NodeType.UNKNOWN, description=self.goal)
+        self.root.id = str(retries)
         self.items = [(self.root, NodeState.ENTERING)]
 
     def process_node_entering(

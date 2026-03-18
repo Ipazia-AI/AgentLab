@@ -46,6 +46,10 @@ class HPA:
         while True:
             while self.stack.items:
                 node, state = self.stack.items.pop()
+                
+                # Skip recovering root node if it has been executed more than 1 time, go for the retry
+                if node.depth == 0 and node.execution_count >= 1:
+                    break
 
                 if node.status == NodeStatus.NOT_RECOVERABLE:
                     self.stack.propagate_failure(node)
@@ -93,7 +97,8 @@ class HPA:
             if self.stack.items or self.stack.completed_nodes:
                 self.previous_attempt_summaries.append(self.stack.summary)
             self.retries += 1
-            self.stack.clean()
+            # Create a new root node with id based on the retries
+            self.stack.clean(retries=self.retries)
 
     def complete_action_node(
         self,
