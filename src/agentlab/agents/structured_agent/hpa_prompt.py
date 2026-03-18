@@ -628,8 +628,9 @@ import agentlab.agents.structured_agent.hpa as hpa
 class _RecoveryChildrenExpansion(dp.PromptElement):
     _prompt = ""
     _abstract_ex = """<recovery_expansion>
-    Provide a list of new subgoals to replace the failed ones. Each subgoal should be on a separate line.
-    </recovery_expansion>"""
+[First new subgoal that addresses the failure]
+[Second new subgoal continuing toward the overall objective]
+</recovery_expansion>"""
 
     _concrete_ex = ""
 
@@ -652,8 +653,8 @@ class _RecoveryChildrenExpansion(dp.PromptElement):
 class _RecoveryReasoning(dp.PromptElement):
     _prompt = ""
     _abstract_ex = """<recovery_reasoning>
-    Brief justification explaining why these new subgoals will succeed where the previous ones failed.
-    </recovery_reasoning>"""
+The previous attempt failed because [describe root cause]. The new plan avoids this by [describe different approach].
+</recovery_reasoning>"""
 
     _concrete_ex = ""
 
@@ -685,22 +686,12 @@ class AndRecoveryPrompt(dp.Shrinkable):
         self,
         node: hpa.Node,
         obs_history: list[dict],
-        constraints: str,
-        progress: str,
-        suggestion: str,
-        tree_context: str,
         flags: HPAPromptFlags,
     ):
         super().__init__()
         self.node = node
         self.flags = flags
         self.children_status = _format_children_status(node)
-        self.hints = PlanningHints(
-            constraints=constraints,
-            progress=progress,
-            suggestion=suggestion,
-            tree_context=tree_context,
-        )
         self.expansion = _RecoveryChildrenExpansion()
         self.reasoning = _RecoveryReasoning()
         self.obs = dp.Observation(obs_history[-1], self.flags.obs)
@@ -731,6 +722,20 @@ that avoids the exact same issue. If a click didn't open a dropdown, try a diffe
 interaction method (e.g. type into the field, use keyboard navigation, click a different
 element). Simply rephrasing the same action is NOT acceptable.
 
+## Action-Intent Mismatch Check:
+For each [NOT_RECOVERABLE] child, compare its *description* (the intended goal) with the
+*action actually executed*. If the action targeted a completely different element than
+described, the failure may be a targeting error rather than a flawed approach.
+In such cases, the original approach may still be valid — consider retrying the same
+strategy with correct element targeting rather than switching to a fundamentally
+different approach.
+
+## Precondition Check:
+Before generating new children, verify from the current observation that the
+preconditions for this node's goal are still met (e.g. the relevant UI panel is
+still open, the page hasn't navigated away). If preconditions are NOT met, your
+first new child should re-establish them.
+
 ## Rules:
 - The node type remains AND. You are generating new ordered subgoals.
 - Do NOT duplicate work already done by [SUCCESS] children.
@@ -743,7 +748,6 @@ element). Simply rephrasing the same action is NOT acceptable.
         prompt.add_text(
             f"""\
 {self.obs.prompt}\
-{self.hints.prompt}\
 """
         )
 
@@ -751,8 +755,8 @@ element). Simply rephrasing the same action is NOT acceptable.
             prompt.add_text(
                 f"""
 # Abstract Example
-{self.expansion._abstract_ex}\n\
-{self.reasoning._abstract_ex}\
+{self.reasoning._abstract_ex}\n\
+{self.expansion._abstract_ex}\
 """
             )
 
@@ -763,8 +767,8 @@ element). Simply rephrasing the same action is NOT acceptable.
 
     def _parse_answer(self, text_answer):
         ans_dict = {}
-        ans_dict.update(self.expansion.parse_answer(text_answer))
         ans_dict.update(self.reasoning.parse_answer(text_answer))
+        ans_dict.update(self.expansion.parse_answer(text_answer))
 
         children = ans_dict.get("recovery_expansion", [])
         if not isinstance(children, list) or not children:
@@ -787,22 +791,12 @@ class OrRecoveryPrompt(dp.Shrinkable):
         self,
         node: hpa.Node,
         obs_history: list[dict],
-        constraints: str,
-        progress: str,
-        suggestion: str,
-        tree_context: str,
         flags: HPAPromptFlags,
     ):
         super().__init__()
         self.node = node
         self.flags = flags
         self.children_status = _format_children_status(node)
-        self.hints = PlanningHints(
-            constraints=constraints,
-            progress=progress,
-            suggestion=suggestion,
-            tree_context=tree_context,
-        )
         self.expansion = _RecoveryChildrenExpansion()
         self.reasoning = _RecoveryReasoning()
         self.obs = dp.Observation(obs_history[-1], self.flags.obs)
@@ -830,6 +824,20 @@ approach that avoids the same failure modes. If previous strategies failed becau
 a specific interaction method, your new strategies must use entirely different methods.
 Simply rephrasing the same strategy is NOT acceptable.
 
+## Action-Intent Mismatch Check:
+For each [NOT_RECOVERABLE] child, compare its *description* (the intended goal) with the
+*action actually executed*. If the action targeted a completely different element than
+described, the failure may be a targeting error rather than a flawed approach.
+In such cases, the original approach may still be valid — consider retrying the same
+strategy with correct element targeting rather than switching to a fundamentally
+different approach.
+
+## Precondition Check:
+Before generating new children, verify from the current observation that the
+preconditions for this node's goal are still met (e.g. the relevant UI panel is
+still open, the page hasn't navigated away). If preconditions are NOT met, your
+first new child should re-establish them.
+
 ## Rules:
 - The node type remains OR. You are generating new alternative strategies.
 - Each new alternative should represent a genuinely different approach.
@@ -841,7 +849,6 @@ Simply rephrasing the same strategy is NOT acceptable.
         prompt.add_text(
             f"""\
 {self.obs.prompt}\
-{self.hints.prompt}\
 """
         )
 
@@ -849,8 +856,8 @@ Simply rephrasing the same strategy is NOT acceptable.
             prompt.add_text(
                 f"""
 # Abstract Example
+{self.reasoning._abstract_ex}\n\
 {self.expansion._abstract_ex}\
-{self.reasoning._abstract_ex}\
 """
             )
 
@@ -861,8 +868,8 @@ Simply rephrasing the same strategy is NOT acceptable.
 
     def _parse_answer(self, text_answer):
         ans_dict = {}
-        ans_dict.update(self.expansion.parse_answer(text_answer))
         ans_dict.update(self.reasoning.parse_answer(text_answer))
+        ans_dict.update(self.expansion.parse_answer(text_answer))
 
         children = ans_dict.get("recovery_expansion", [])
         if not isinstance(children, list) or not children:

@@ -173,10 +173,6 @@ class HPAAgent(GenericAgent):
             prompt_cls(
                 node=node,
                 obs_history=self.obs_history,
-                constraints=self.constraints,
-                progress=self.progress,
-                suggestion=self.suggestion,
-                tree_context=tree_context,
                 flags=self.flags,
             ),
             SystemMessage(SystemPlanningPrompt().prompt),
