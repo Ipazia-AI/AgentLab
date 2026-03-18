@@ -25,6 +25,7 @@ class Stack:
         recovery_function,
         get_tree_context,
         on_unknown_expanded,
+        on_recovery=None,
     ) -> Node:
         node.execution_count += 1
 
@@ -33,12 +34,16 @@ class Stack:
             if node.revision_count > node.max_revision_count:
                 node.status = NodeStatus.NOT_RECOVERABLE
                 self.propagate_failure(node)
+                if on_recovery is not None:
+                    on_recovery(node, "NOT_RECOVERABLE", "")
                 return node
             tree_context = get_tree_context(node)
             print(f"\n{'='*60}\nRecovering node {node.id}\n{'='*60}\n{tree_context}\n{'='*60}\n")
             recovery_function(node, tree_context)
             node.discard_useless_children()
             node.status = NodeStatus.VISITED
+            if on_recovery is not None:
+                on_recovery(node, "VISITED", tree_context)
 
         elif node.type == NodeType.UNKNOWN:
             tree_context = get_tree_context(node)

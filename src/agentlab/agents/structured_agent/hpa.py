@@ -74,12 +74,20 @@ class HPA:
                         def on_unknown_expanded(_):
                             pass
 
+                    def on_recovery(recovered_node: Node, outcome: str, tree_context: str):
+                        self.telemetry.record_recovery(
+                            node=recovered_node,
+                            outcome=outcome,
+                            tree_context=tree_context,
+                        )
+
                     self.pending_node = self.stack.process_node_entering(
                         node=node,
                         expansion_function=expansion_function,
                         recovery_function=recovery_function,
                         get_tree_context=self.get_tree_context,
                         on_unknown_expanded=on_unknown_expanded,
+                        on_recovery=on_recovery,
                     )
                     if self.pending_node.type == NodeType.ACTION:
                         return self.pending_node
@@ -114,6 +122,7 @@ class HPA:
         if action_error:
             self.pending_node.status = NodeStatus.NOT_RECOVERABLE
             self.pending_node.action_error = action_error
+            verification_source = "action_error"
         elif verification_function is not None:
             is_success, explanation = verification_function(self.pending_node)
             if is_success:
@@ -121,9 +130,21 @@ class HPA:
             else:
                 self.pending_node.status = NodeStatus.NOT_RECOVERABLE
                 self.pending_node.action_error = explanation
+            verification_source = "verification_function"
         else:
             self.pending_node.status = NodeStatus.SUCCESS
+            verification_source = "no_verification"
+
         self.telemetry.set_action_outcome(self.pending_node.status)
+        self.telemetry.set_action_verification(
+            {
+                "node_id": self.pending_node.id,
+                "node_description": self.pending_node.description,
+                "verification_source": verification_source,
+                "is_success": self.pending_node.status == NodeStatus.SUCCESS,
+                "error": self.pending_node.action_error or "",
+            }
+        )
 
         print(f"{60*'='}\nAction Verification\n{60*'='}\n")
         print(f"Action: {self.pending_node.description}")

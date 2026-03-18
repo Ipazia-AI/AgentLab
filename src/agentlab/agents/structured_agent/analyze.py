@@ -54,6 +54,46 @@ def format_hpa_plan_markdown(plan: dict | None) -> str:
         else:
             lines.append(_code_block(str(updated_nodes)))
 
+    action_verification = plan.get("action_verification")
+    lines.append("### Action Verification (Previous Step)")
+    if isinstance(action_verification, dict):
+        v_node_id = action_verification.get("node_id", "N/A")
+        v_node_desc = action_verification.get("node_description", "N/A")
+        v_source = action_verification.get("verification_source", "N/A")
+        v_success = action_verification.get("is_success", "N/A")
+        v_error = action_verification.get("error", "")
+        lines.append(
+            f"- Node: `{v_node_id}`\n- Description: {v_node_desc}\n"
+            f"- Source: `{v_source}`\n- Success: **{v_success}**"
+        )
+        if v_error:
+            lines.append(f"- Error: {v_error}")
+    else:
+        lines.append("- None")
+
+    recoveries = plan.get("recoveries", [])
+    lines.append("### Node Recoveries")
+    if recoveries:
+        for i, recovery in enumerate(recoveries, start=1):
+            r_node_id = recovery.get("node_id", "N/A")
+            r_node_desc = recovery.get("node_description", "N/A")
+            r_node_type = recovery.get("node_type", "N/A")
+            r_revision = recovery.get("revision_count", "N/A")
+            r_max_revision = recovery.get("max_revision_count", "N/A")
+            r_outcome = recovery.get("outcome", "N/A")
+            lines.append(
+                f"#### Recovery {i}\n- Node: `{r_node_id}` ({r_node_type})\n"
+                f"- Description: {r_node_desc}\n"
+                f"- Revision: {r_revision}/{r_max_revision}\n"
+                f"- Outcome: **{r_outcome}**"
+            )
+            r_tree_context = recovery.get("tree_context", "")
+            if r_tree_context:
+                lines.append("##### Tree Context at Recovery")
+                lines.append(_code_block(r_tree_context))
+    else:
+        lines.append("- None")
+
     lines.append("### Tree Evolution To Current Step")
     if expansions and isinstance(expansions[0], dict) and "order" in expansions[0]:
         expansions = sorted(expansions, key=lambda e: e.get("order", 0))

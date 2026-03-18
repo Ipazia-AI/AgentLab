@@ -16,15 +16,36 @@ class PlanTelemetry:
         self.last_tree_evolution: list[TreeExpansionTrace] = []
         self.last_tree_update_result: dict | None = None
         self.last_pending_outcome: str | None = None
+        self.last_recoveries: list[dict] = []
+        self.last_action_verification: dict | None = None
 
     def reset_for_action(self) -> None:
         self.last_tree_evolution = []
+        self.last_recoveries = []
 
     def set_action_outcome(self, status: NodeStatus) -> None:
         self.last_pending_outcome = status.name
 
     def set_tree_update_result(self, result: dict | None) -> None:
         self.last_tree_update_result = result
+
+    def record_recovery(
+        self, node: Node, outcome: str, tree_context: str
+    ) -> None:
+        self.last_recoveries.append(
+            {
+                "node_id": node.id,
+                "node_description": node.description,
+                "node_type": node.type.name,
+                "revision_count": node.revision_count,
+                "max_revision_count": node.max_revision_count,
+                "outcome": outcome,
+                "tree_context": tree_context,
+            }
+        )
+
+    def set_action_verification(self, verification: dict) -> None:
+        self.last_action_verification = verification
 
     def record_expansion(
         self, node: Node, retry: int, tree_context_before: list[TreeContextEntry]
@@ -131,6 +152,8 @@ class PlanTelemetry:
                 "selected_action_node": selected_node,
                 "selected_action_node_depth": selected_node_depth,
             },
+            "action_verification": self.last_action_verification,
+            "recoveries": self.last_recoveries,
             "expansions": expansions,
             "tree_counts": tree_counts,
             "tree_snapshot": tree_snapshot,
