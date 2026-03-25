@@ -27,25 +27,45 @@ from agentlab.llm.llm_utils import (
     SystemMessage,
     retry,
 )
-from agentlab.llm.tracking import cost_tracker_decorator
+from agentlab.llm.tracking import cost_tracker_decorator, set_tracker
 
 from .hpa import HPA, Node
 
 
 @dataclass
 class HPAAgentArgs(GenericAgentArgs):
+    action_model_args: BaseModelArgs = None
     budget: int = 1000
     flags: HPAPromptFlags = None
 
     def __post_init__(self):
-        if self.chat_model_args is not None:
-            self.agent_name = f"HPAAgent-{self.chat_model_args.model_name}".replace("/", "_")
+        planner_name = getattr(self.chat_model_args, "model_name", None)
+        action_name = getattr(self.action_model_args, "model_name", None)
+        if planner_name and action_name:
+            self.agent_name = (
+                f"HPAAgent-planner_{planner_name}-actor_{action_name}".replace("/", "_")
+            )
+        elif planner_name:
+            self.agent_name = f"HPAAgent-{planner_name}".replace("/", "_")
         else:
             self.agent_name = "HPAAgent"
+
+    def set_reproducibility_mode(self):
+        self.chat_model_args.temperature = 0
+        self.action_model_args.temperature = 0
+
+    def prepare(self):
+        self.chat_model_args.prepare_server()
+        self.action_model_args.prepare_server()
+
+    def close(self):
+        self.chat_model_args.close_server()
+        self.action_model_args.close_server()
 
     def make_agent(self) -> GenericAgent:
         return HPAAgent(
             chat_model_args=self.chat_model_args,
+            action_model_args=self.action_model_args,
             flags=self.flags,
             budget=self.budget,
             max_retry=self.max_retry,
@@ -56,11 +76,14 @@ class HPAAgent(GenericAgent):
     def __init__(
         self,
         chat_model_args: BaseModelArgs | None,
+        action_model_args: BaseModelArgs,
         flags: HPAPromptFlags,
         budget: int,
         max_retry: int,
     ):
         self.budget = budget
+        self.action_model_args = action_model_args
+        self.action_llm = action_model_args.make_model()
         super().__init__(chat_model_args, flags, max_retry)
         self.constraints: str | None = None
         self.progress: str | None = None
@@ -105,6 +128,11 @@ class HPAAgent(GenericAgent):
         plan_info = self.hpa.get_telemetry(step_index=len(self.actions))
         markdown_page = format_hpa_plan_markdown(plan_info)
 
+        model_extra = {
+            "planner_model_args": asdict(self.chat_model_args),
+            "action_model_args": asdict(self.action_model_args),
+        }
+
         if self.pending_action_node is not None:
 
             chat_messages, stats = self._infer_action()
@@ -114,16 +142,17 @@ class HPAAgent(GenericAgent):
                 chat_messages=chat_messages,
                 stats=stats,
                 markdown_page=markdown_page,
-                extra_info={"chat_model_args": asdict(self.chat_model_args), "hpa_plan": plan_info},
+                extra_info={**model_extra, "hpa_plan": plan_info},
             )
             return self.actions[-1], agent_info
         else:
+            stats = {**self.chat_llm.get_stats(), **self.action_llm.get_stats()}
             agent_info = AgentInfo(
                 think=None,
                 chat_messages=Discussion(),
-                stats=self.chat_llm.get_stats(),
+                stats=stats,
                 markdown_page=markdown_page,
-                extra_info={"chat_model_args": asdict(self.chat_model_args), "hpa_plan": plan_info},
+                extra_info={**model_extra, "hpa_plan": plan_info},
             )
             return None, agent_info
 
@@ -210,10 +239,13 @@ class HPAAgent(GenericAgent):
             flags=self.flags,
         )
 
-        ans_dict, chat_messages, stats = self._infer(
-            main_prompt,
-            SystemMessage(dp.SystemPrompt().prompt),
-        )
+        with set_tracker(suffix="action"):
+            ans_dict, chat_messages, stats = self._infer(
+                main_prompt,
+                SystemMessage(dp.SystemPrompt().prompt),
+                chat_llm=self.action_llm,
+                model_args=self.action_model_args,
+            )
 
         self.actions.append(ans_dict.get("action", None))
         self.memories.append(ans_dict.get("memory", None))
@@ -231,28 +263,48 @@ class HPAAgent(GenericAgent):
 
         return chat_messages, stats
 
+    def _get_maxes_for(self, model_args: BaseModelArgs):
+        maxes = (
+            self.flags.max_prompt_tokens,
+            model_args.max_total_tokens,
+            model_args.max_input_tokens,
+        )
+        maxes = [m for m in maxes if m is not None]
+        max_prompt_tokens = min(maxes) if maxes else None
+        max_trunc_itr = (
+            self.flags.max_trunc_itr
+            if self.flags.max_trunc_itr
+            else 20
+        )
+        return max_prompt_tokens, max_trunc_itr
+
     def _infer(
-        self, main_prompt: dp.Shrinkable, system_prompt: BaseMessage
+        self,
+        main_prompt: dp.Shrinkable,
+        system_prompt: BaseMessage,
+        chat_llm=None,
+        model_args: BaseModelArgs | None = None,
     ) -> tuple[dict, Discussion, dict]:
-        max_prompt_tokens, max_trunc_itr = self._get_maxes()
+        llm = chat_llm or self.chat_llm
+        args = model_args or self.chat_model_args
+        max_prompt_tokens, max_trunc_itr = self._get_maxes_for(args)
 
         human_prompt = dp.fit_tokens(
             shrinkable=main_prompt,
             max_prompt_tokens=max_prompt_tokens,
-            model_name=self.chat_model_args.model_name,
+            model_name=args.model_name,
             max_iterations=max_trunc_itr,
             additional_prompts=system_prompt,
         )
         try:
             chat_messages = Discussion([system_prompt, human_prompt])
             ans_dict = retry(
-                self.chat_llm,
+                llm,
                 chat_messages,
                 n_retry=self.max_retry,
                 parser=main_prompt._parse_answer,
             )
             ans_dict["busted_retry"] = 0
-            # inferring the number of retries, TODO: make this less hacky
             ans_dict["n_retry"] = (len(chat_messages) - 3) / 2
         except ParseError:
             ans_dict = dict(
@@ -261,7 +313,7 @@ class HPAAgent(GenericAgent):
                 busted_retry=1,
             )
 
-        stats = self.chat_llm.get_stats()
+        stats = llm.get_stats()
         stats["n_retry"] = ans_dict["n_retry"]
         stats["busted_retry"] = ans_dict["busted_retry"]
 
