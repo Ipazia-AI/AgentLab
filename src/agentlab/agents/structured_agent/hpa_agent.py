@@ -27,7 +27,7 @@ from agentlab.llm.llm_utils import (
     SystemMessage,
     retry,
 )
-from agentlab.llm.tracking import cost_tracker_decorator, set_tracker
+from agentlab.llm.tracking import LLMTracker, cost_tracker_decorator, set_tracker
 
 from .hpa import HPA, Node
 
@@ -89,6 +89,10 @@ class HPAAgent(GenericAgent):
         self.progress: str | None = None
         self.suggestion: str | None = None
 
+    @staticmethod
+    def _zero_tracker_stats(suffix: str) -> dict:
+        return LLMTracker(suffix).stats
+
     def reset(self, seed=None):
         super().reset(seed)
 
@@ -112,19 +116,22 @@ class HPAAgent(GenericAgent):
         if len(self.obs_history) == 1:
             self.hpa.set_goal(self.obs_history[0])
 
-        if self.pending_action_node is not None and isinstance(obs, dict):
-            self.hpa.complete_action_node(
-                self.chat_model_args.model_name,
-                self.constraints,
-                self.progress,
-                self.suggestion,
-                self.obs_history,
-                verification_function=self._infer_action_verification,
-            )
-            self.pending_action_node = None
+        with set_tracker(suffix="planner") as planner_tracker:
+            if self.pending_action_node is not None and isinstance(obs, dict):
+                self.hpa.complete_action_node(
+                    self.chat_model_args.model_name,
+                    self.constraints,
+                    self.progress,
+                    self.suggestion,
+                    self.obs_history,
+                    verification_function=self._infer_action_verification,
+                )
+                self.pending_action_node = None
 
-        self._infer_insight()
-        self.pending_action_node = self.hpa.get_action_node(self._infer_plan, self._infer_recovery)
+            self._infer_insight()
+            self.pending_action_node = self.hpa.get_action_node(
+                self._infer_plan, self._infer_recovery
+            )
         plan_info = self.hpa.get_telemetry(step_index=len(self.actions))
         markdown_page = format_hpa_plan_markdown(plan_info)
 
@@ -136,6 +143,7 @@ class HPAAgent(GenericAgent):
         if self.pending_action_node is not None:
 
             chat_messages, stats = self._infer_action()
+            stats.update(planner_tracker.stats)
 
             agent_info = AgentInfo(
                 think=self.thoughts[-1],
@@ -147,6 +155,8 @@ class HPAAgent(GenericAgent):
             return self.actions[-1], agent_info
         else:
             stats = {**self.chat_llm.get_stats(), **self.action_llm.get_stats()}
+            stats.update(planner_tracker.stats)
+            stats.update(self._zero_tracker_stats("actor"))
             agent_info = AgentInfo(
                 think=None,
                 chat_messages=Discussion(),
@@ -239,13 +249,14 @@ class HPAAgent(GenericAgent):
             flags=self.flags,
         )
 
-        with set_tracker(suffix="action"):
+        with set_tracker(suffix="actor") as action_tracker:
             ans_dict, chat_messages, stats = self._infer(
                 main_prompt,
                 SystemMessage(dp.SystemPrompt().prompt),
                 chat_llm=self.action_llm,
                 model_args=self.action_model_args,
             )
+        stats.update(action_tracker.stats)
 
         self.actions.append(ans_dict.get("action", None))
         self.memories.append(ans_dict.get("memory", None))
