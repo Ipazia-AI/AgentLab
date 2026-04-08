@@ -1,0 +1,22 @@
+# Path to the task categories file
+task_categories: "tasks_categories.csv"
+
+# Experiment directories and how to preprocess them
+runs:
+  - id: "genericagent_gemini-3-flash"
+    exp_dir: "~/agentlab_results/genericagent-google-gemini-3-flash-preview-on-workarena-l1-baseline-30-steps"
+    is_genericagent: true
+    n_steps: 30
+    save_csv: false
+  
+  - id: "hpa_gemini-3-flash_89.4"
+    exp_dir: "~/agentlab_results/2026-03-24_18-09-16_hpaagent-google-gemini-3-flash-preview-on-workarena-l1-894"
+    is_genericagent: false
+    n_steps: 30
+    save_csv: false
+
+  - id: "hpa_gemini-3-flash_90.3"
+    exp_dir: "~/agentlab_results/2026-03-07_00-38-28_hpaagent-google-gemini-3-flash-preview-on-workarena-l1-903"
+    is_genericagent: false
+    n_steps: 30
+    save_csv: false
