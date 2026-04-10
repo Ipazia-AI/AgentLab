@@ -1,0 +1,46 @@
+# Path to the L1 task categories file
+task_categories_l1: "tasks_categories_l1.csv"
+
+# Experiment directories and how to preprocess them
+runs:
+  - id: "genericagent_gemini-3-flash"
+    subset: "l1"
+    exp_dir: "~/agentlab_results/genericagent-google-gemini-3-flash-preview-on-workarena-l1-baseline-30-steps"
+    is_genericagent: true
+    n_steps: 30
+    save_csv: true
+  
+  - id: "hpa_gemini-3-flash_89.4"
+    subset: "l1"
+    exp_dir: "~/agentlab_results/2026-03-24_18-09-16_hpaagent-google-gemini-3-flash-preview-on-workarena-l1-894"
+    is_genericagent: false
+    n_steps: 30
+    save_csv: true
+
+  - id: "hpa_gemini-3-flash_90.3"
+    subset: "l1"
+    exp_dir: "~/agentlab_results/2026-03-07_00-38-28_hpaagent-google-gemini-3-flash-preview-on-workarena-l1-903"
+    is_genericagent: false
+    n_steps: 30
+    save_csv: true
+
+  - id: "genericagent_gemini-3-flash_40.0"
+    subset: "l2"
+    exp_dir: "~/agentlab_results/2026-03-12_10-54-28_genericagent-google-gemini-3-flash-preview-on-workarena-l2-agent-curriculum-eval-400"
+    is_genericagent: true
+    n_steps: 50
+    save_csv: true
+
+  - id: "hpa_gemini-3-flash_45.1"
+    subset: "l2"
+    exp_dir: "~/agentlab_results/2026-03-16_09-27-49_hpaagent-google-gemini-3-flash-preview-on-workarena-l2-agent-curriculum-eval-451"
+    is_genericagent: false
+    n_steps: 50
+    save_csv: true
+
+  - id: "hpa_planner_gemini-3-flash_actor_gpt-5_59.6"
+    subset: "l2"
+    exp_dir: "~/agentlab_results/2026-04-03_13-25-10_hpaagent-planner-google-gemini-3-flash-preview-actor-openai-gpt-5-on-workarena-l2-agent-curriculum-eval-596"
+    is_genericagent: false
+    n_steps: 50
+    save_csv: true

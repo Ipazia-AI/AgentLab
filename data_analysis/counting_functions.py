@@ -12,7 +12,7 @@ ACTION_VERIFICATION_SCHEMA = [
 ]
 
 def count_pruned_nodes(tree_evolution: dict) -> int:
-    return sum(len(step["tree_update"]["prune"]) for step in tree_evolution.values())
+    return sum(len(step.get("tree_update", {}).get("prune", [])) for step in tree_evolution.values())
 
 def count_action_report_frequencies(row: pd.Series) -> dict:
     error_count = 0
@@ -31,7 +31,7 @@ def count_retries(tree_evolution: dict) -> int:
     Computes the maximum retry value encountered during the tree evolution.
     """
     max_retry = 0
-
+    
     for step in tree_evolution.values():
         # Access the list of expansion attempts in this step
         expansions = step.get("expansions", [])
@@ -43,7 +43,7 @@ def count_retries(tree_evolution: dict) -> int:
                 max_retry = current_retry
                 
     return max_retry
-
+    
 def count_node_recoveries(tree_evolution: dict) -> int:
     return sum(len(step.get("recoveries", [])) for step in tree_evolution.values())
 
@@ -54,7 +54,7 @@ def calculate_verifications(row: pd.Series) -> dict:
     n_steps = row["n_steps"]
     
     # Iterate through step in the tree
-    for step_data in tree.values():
+    for step_index, step_data in enumerate(tree.values()):
         v = step_data.get("action_verification")
         
         if isinstance(v, dict):
@@ -67,9 +67,11 @@ def calculate_verifications(row: pd.Series) -> dict:
                 # Dynamic key: "action_error_success", "verification_function_failure", etc.
                 key = f"{source}_{'success' if success else 'failure'}"
                 counts[key] += 1
-        else:
+        elif step_index == 0:
             # action verifications at step 0 are None
             counts["first_step"] += 1
+        else:
+            counts["action_error_failure"] += 1
     
     # Return normalized dictionary (handling division by zero)
     divisor = n_steps if n_steps > 0 else 1
