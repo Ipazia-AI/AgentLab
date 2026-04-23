@@ -77,13 +77,19 @@ agent_configs = [agent_config]
 # Benchmark
 # ---------------------------------------------------------------------------
 benchmark = DEFAULT_BENCHMARKS["workarena_l1"]()
+# benchmark = benchmark.subset_from_regexp(
+#     column="task_name", regexp="workarena.servicenow.single-chart-value-retrieval"
+# )
+# env_args = benchmark.env_args_list[0]
+# env_args.task_seed = 769
+# benchmark.env_args_list = [env_args]
 tasks_list = [
     "workarena.servicenow.all-menu",
-    "workarena.servicenow.filter-hardware-list",
-    "workarena.servicenow.single-chart-value-retrieval",
-    "workarena.servicenow.sort-asset-list",
+    # "workarena.servicenow.filter-hardware-list",
+    # "workarena.servicenow.single-chart-value-retrieval",
+    # "workarena.servicenow.sort-asset-list",
 ]
-benchmark = benchmark.subset_from_list(tasks_list, benchmark_name_suffix="hpa_doubles_llm_reduced_l1")
+benchmark = benchmark.subset_from_list(tasks_list, benchmark_name_suffix="hpa_single_llm_reduced_l1")
 n_jobs = 1
 
 if __name__ == "__main__":
