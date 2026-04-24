@@ -37,7 +37,7 @@ def preprocess_raw_data(experiment_config: ExperimentConfig) -> pd.DataFrame:
     preprocessed_df["model"] = [experiment_config.id] * len(preprocessed_df)
     preprocessed_df["task_category"] = preprocessed_df["env.task_name"].map(experiment_config.task_category_mapping(task_lookup))
     new_cols = preprocessed_df["exp_dir"].apply(add_pkl_info_to_dataframe, is_genericagent=experiment_config.is_genericagent)
-    preprocessed_df[["tree_evolution", "action_report"]] = new_cols
+    preprocessed_df[["tree_evolution", "action_report", "actions", "axtree_objects"]] = new_cols
     preprocessed_df["action_report_frequencies"] = preprocessed_df.apply(count_action_report_frequencies, axis=1)
 
     if not experiment_config.is_genericagent:
@@ -58,6 +58,8 @@ def add_pkl_info_to_dataframe(exp_dir: str | Path, is_genericagent: bool = False
     pkl_file_list.sort(key=lambda x: int(Path(x.stem).stem.split("_")[-1]))
     tree_evolution = {}
     action_report = {}
+    actions = {}
+    axtree_objects = {}
     
     for index, pkl_file in enumerate(pkl_file_list):
         with gzip.open(pkl_file, "rb") as f:
@@ -65,10 +67,14 @@ def add_pkl_info_to_dataframe(exp_dir: str | Path, is_genericagent: bool = False
             if hasattr(obj.agent_info, "extra_info") and not is_genericagent:
                 tree_evolution[f"{PKL_PREFIX}{index}"] = obj.agent_info.extra_info["hpa_plan"]
             action_report[f"{PKL_PREFIX}{index}"] = (obj.obs or {}).get("last_action_error") # Handle cases where obj.obs is None
+            actions[f"{PKL_PREFIX}{index}"] = obj.action
+            axtree_objects[f"{PKL_PREFIX}{index}"] = (obj.obs or {}).get("axtree_txt", "")
 
     return pd.Series({
         "tree_evolution": tree_evolution, 
-        "action_report": action_report
+        "action_report": action_report,
+        "actions": actions,
+        "axtree_objects": axtree_objects
     })
 
 def str_to_dict(s: str) -> dict:
@@ -79,6 +85,8 @@ def read_preprocessed_csv(path: Path) -> pd.DataFrame:
     preprocessed_df["tree_evolution"] = preprocessed_df["tree_evolution"].apply(str_to_dict)
     preprocessed_df["action_report"] = preprocessed_df["action_report"].apply(str_to_dict)
     preprocessed_df["action_report_frequencies"] = preprocessed_df["action_report_frequencies"].apply(str_to_dict)
+    preprocessed_df["actions"] = preprocessed_df["actions"].apply(str_to_dict)
+    preprocessed_df["axtree_objects"] = preprocessed_df["axtree_objects"].apply(str_to_dict)
     if "action_verifications" in preprocessed_df.columns.values:
         preprocessed_df["action_verifications"] = preprocessed_df["action_verifications"].apply(str_to_dict)
     return preprocessed_df

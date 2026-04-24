@@ -1,10 +1,7 @@
 import pandas as pd
 import typer
 from processing import DATA_DIRECTORY, preprocess_raw_data, read_preprocessed_csv
-from read_configuration import (
-    EXPERIMENT_CONFIGS_PATH,
-    load_experiment_configs_from_ids,
-)
+from read_configuration import EXPERIMENT_CONFIGS_PATH, load_experiment_configs_from_ids
 
 app = typer.Typer(no_args_is_help=True)
 
