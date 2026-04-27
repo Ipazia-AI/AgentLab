@@ -64,12 +64,12 @@ class TreeUpdateEngine:
         )
         result = self._call_json_prompt(model_name, system_message, user_message)
         pruned_node_ids = result.get("prune", [])
-        updated_node_ids = result.get("update", {})
+        # updated_node_ids = result.get("update", {})
         print(f"\n{'='*60}\nTree Update\n{'='*60}\n")
         self._prune_nodes_from_global_tree(pruned_node_ids=pruned_node_ids, global_tree=global_tree)
-        self._update_nodes_in_global_tree(
-            updated_node_ids=updated_node_ids, global_tree=global_tree
-        )
+        # self._update_nodes_in_global_tree(
+        #     updated_node_ids=updated_node_ids, global_tree=global_tree
+        # )
         print(f"\n{'='*60}")
         return result
 
