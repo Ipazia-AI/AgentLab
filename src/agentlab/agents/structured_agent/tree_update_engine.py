@@ -48,7 +48,7 @@ class TreeUpdateEngine:
         global_tree = self._get_global_tree(stack)
         global_tree_info = "\n\n".join(
             [
-                f"NODE ID: {node.id}\nNODE TYPE: {node.type.name}\nNODE STATUS: {node.status.name}\nNODE DESCRIPTION: {node.description}\nNODE ACTION: {node.action}"
+                self.format_node_info(node)
                 for node in global_tree
             ]
         )
@@ -190,3 +190,15 @@ class TreeUpdateEngine:
                 raise ParseError(f"Return valid JSON only. Error: {exc}") from exc
 
         return retry(self.chat_llm, messages, n_retry=2, parser=parser)
+
+    def format_node_info(self, node: Node) -> str:
+        lines = [
+            f"NODE ID: {node.id}",
+            f"NODE TYPE: {node.type.name}",
+            f"NODE STATUS: {node.status.name}",
+            f"NODE DESCRIPTION: {node.description}",
+        ]
+        if node.type == NodeType.ACTION:
+            lines.append(f"NODE ACTION: {node.action}")
+            lines.append(f"NODE ACTION ERROR: {node.action_error}")
+        return "\n".join(lines)

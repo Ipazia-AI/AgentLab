@@ -6,6 +6,7 @@ from browsergym.experiments import AgentInfo
 from agentlab.agents import dynamic_prompting as dp
 from agentlab.agents.generic_agent.generic_agent import GenericAgent, GenericAgentArgs
 from agentlab.agents.structured_agent.analyze import format_hpa_plan_markdown
+from agentlab.agents.structured_agent.andor_tree import NodeType
 from agentlab.agents.structured_agent.hpa_prompt import (
     ActionVerificationPrompt,
     AndRecoveryPrompt,
@@ -17,7 +18,6 @@ from agentlab.agents.structured_agent.hpa_prompt import (
     SystemInsightPrompt,
     SystemPlanningPrompt,
 )
-from agentlab.agents.structured_agent.andor_tree import NodeType
 from agentlab.agents.structured_agent.structured_agent_prompt import MainPrompt
 from agentlab.llm.base_api import BaseModelArgs
 from agentlab.llm.llm_utils import (

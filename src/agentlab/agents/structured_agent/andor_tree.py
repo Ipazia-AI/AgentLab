@@ -1,4 +1,3 @@
-from dataclasses import dataclass
 from enum import Enum, auto
 from typing import Any, Optional
 
@@ -153,11 +152,9 @@ class Node(BaseModel):
         current = self
         while current is not None:
             ancestor_ids.add(current.id)
+            if current.parent is None:
+                root = current
             current = current.parent
-
-        root = self
-        while root.parent is not None:
-            root = root.parent
 
         entries: list[TreeContextEntry] = []
 

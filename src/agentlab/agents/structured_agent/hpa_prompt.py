@@ -2,8 +2,7 @@ import abc
 import logging
 from dataclasses import dataclass
 
-from browsergym.core.action.highlevel import AbstractActionSet
-
+import agentlab.agents.structured_agent.hpa as hpa
 from agentlab.agents import dynamic_prompting as dp
 from agentlab.agents.generic_agent.generic_agent_prompt import GenericPromptFlags
 from agentlab.llm.llm_utils import (
@@ -29,11 +28,11 @@ A constraint is an explicitly stated condition that affects the goal execution.<
 """
 
     _concrete_ex = """
-<constraints><constraint>Laptop bag color: black</constraint>
+<constraints>Laptop bag color: black</constraint>
 <constraint>Laptop price: under $40</constraint>
 <constraint>Mouse type: wireless</constraint>
 <constraint>Wireless mouse price: under $25</constraint>
-<constraint>Delivery time: within 2 days</constraint></constraints>
+<constraint>Delivery time: within 2 days</constraint>
 """
 
     def _parse_answer(self, text_answer):
@@ -620,9 +619,6 @@ You examine the current state of the webpage after the action was executed and d
 if the action's objective was fulfilled. Judge by functional outcome, not by literal wording:
 if the page state reflects the intended effect, the action succeeded even when UI labels
 differ slightly from the goal description. Be concise and precise."""
-
-
-import agentlab.agents.structured_agent.hpa as hpa
 
 
 class _RecoveryChildrenExpansion(dp.PromptElement):
