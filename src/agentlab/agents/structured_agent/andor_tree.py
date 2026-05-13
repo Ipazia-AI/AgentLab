@@ -43,16 +43,18 @@ class NodeType(Enum):
 
 
 class NodeStatus(Enum):
-    UNVISITED = auto()    # Node that was not visited yet
-    VISITED = auto()    # Node that performed an expansion
-    SUCCESS = auto()    # Node that completed successfully
-    RECOVERABLE = auto()    # Node that failed but can be recovered
-    NOT_RECOVERABLE = auto()    # Node that failed and cannot be recovered
-    DELETED = auto()    # Node that was deleted from the tree
+    UNVISITED = auto()        # Node that was not visited yet
+    VISITED = auto()          # Node that performed an expansion
+    SUCCESS = auto()          # Node that completed successfully
+    RECOVERABLE = auto()      # Node that failed but can be recovered
+    NOT_RECOVERABLE = auto()  # Node that failed and cannot be recovered
+    DELETED = auto()          # Node that was deleted from the tree
+    EXHAUSTED = auto()        # Permanently failed, archived so LLMs can see failure history
 
 
-CLOSED_STATUSES = {NodeStatus.SUCCESS, NodeStatus.DELETED, NodeStatus.NOT_RECOVERABLE}
-PRESERVED_STATUSES = {NodeStatus.SUCCESS, NodeStatus.NOT_RECOVERABLE}
+CLOSED_STATUSES = {NodeStatus.SUCCESS, NodeStatus.DELETED, NodeStatus.NOT_RECOVERABLE, NodeStatus.EXHAUSTED}
+# PRESERVED_STATUSES: mark_deleted_subtree will not overwrite these, preserving history across recovery cycles
+PRESERVED_STATUSES = {NodeStatus.SUCCESS, NodeStatus.NOT_RECOVERABLE, NodeStatus.EXHAUSTED}
 
 class NodeState(Enum):
     ENTERING = auto()
@@ -85,11 +87,11 @@ class Node(BaseModel):
     def add_child(self, child: "Node"):
         child.id = self.id + f".{len(self.children)+1}"
         self.children.append(child)
-        
+
     def discard_useless_children(self):
         for child in self.children:
             if child.status == NodeStatus.NOT_RECOVERABLE:
-                child.status = NodeStatus.DELETED
+                child.status = NodeStatus.EXHAUSTED
 
     def __str__(self) -> str:
         return f"Node(id={self.id}, type={self.type.name}, status={self.status.name}, description={self.description}, action={self.action}, action_error={self.action_error}, parent={self.parent.id if self.parent else None}, children={len(self.children)})"
@@ -104,16 +106,13 @@ class Node(BaseModel):
 
     @property
     def valid_children(self) -> list["Node"]:
-        return [c for c in self.children if c.status not in {NodeStatus.NOT_RECOVERABLE, NodeStatus.DELETED}]
+        return [c for c in self.children if c.status not in {NodeStatus.NOT_RECOVERABLE, NodeStatus.DELETED, NodeStatus.EXHAUSTED}]
 
     @property
     def successful_children_and(self) -> bool:
-        # An AND node is successful when all its children are SUCCESS or when at least one child is SUCCESS and the others DELETED
-        if all(c.status == NodeStatus.SUCCESS for c in self.children):
-            return True
-        if any(c.status == NodeStatus.SUCCESS for c in self.children):
-            return all(c.status in {NodeStatus.DELETED, NodeStatus.SUCCESS} for c in self.children)
-        return False
+        # An AND node is successful when all its children are SUCCESS or when at least one child is SUCCESS and the others are inert (DELETED/EXHAUSTED)
+        _inert_or_success = {NodeStatus.SUCCESS, NodeStatus.DELETED, NodeStatus.EXHAUSTED}
+        return (all(c.status in _inert_or_success for c in self.children) and any(c.status == NodeStatus.SUCCESS for c in self.children))
 
     @property
     def successful_children_or(self) -> bool:
@@ -122,16 +121,17 @@ class Node(BaseModel):
 
     @property
     def valid_children_and(self) -> bool:
+        # EXHAUSTED children must NOT block this check — they are archived failures replaced by new children
         return all(c.status not in {NodeStatus.NOT_RECOVERABLE} for c in self.children)
 
     @property
     def valid_children_or(self) -> bool:
-        return any(c.status not in {NodeStatus.NOT_RECOVERABLE, NodeStatus.DELETED} for c in self.children)
-    
+        return any(c.status not in {NodeStatus.NOT_RECOVERABLE, NodeStatus.DELETED, NodeStatus.EXHAUSTED} for c in self.children)
+
     @property
     def all_deleted_children(self) -> bool:
-        return all(c.status == NodeStatus.DELETED for c in self.children)
-    
+        return all(c.status in {NodeStatus.DELETED, NodeStatus.EXHAUSTED} for c in self.children)
+
     @property
     def is_preserved_status(self) -> bool:
         return self.status in PRESERVED_STATUSES
@@ -159,6 +159,22 @@ class Node(BaseModel):
         entries: list[TreeContextEntry] = []
 
         def _render(node: Node, depth: int, show_deleted: bool = False) -> None:
+            if node.status == NodeStatus.EXHAUSTED:
+                # Always show exhausted nodes — their failure history is the reason they exist.
+                # Do not recurse into their children (dead subtree, would add noise).
+                entries.append(
+                    TreeContextEntry(
+                        depth=depth,
+                        node_id=node.id,
+                        description=node.description,
+                        action=node.action,
+                        status=node.status.name,
+                        type_label=node.type.name,
+                        marker_expand=False,
+                        action_error=node.action_error,
+                    )
+                )
+                return
             if node.status == NodeStatus.DELETED:
                 if not show_deleted:
                     return

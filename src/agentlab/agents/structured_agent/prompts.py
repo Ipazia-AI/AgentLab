@@ -85,6 +85,7 @@ Node status indicators:
 - RECOVERABLE: failed but recovery is in progress
 - NOT_RECOVERABLE: failed permanently and cannot be retried
 - DELETED: removed from the plan (pruned)
+- EXHAUSTED: permanently failed node preserved for context; cannot be pruned
 
 Each node has a NODE ACTION field that shows the exact browser command executed for ACTION nodes (e.g. click('a1201'), hover('a456')). 
 Use this information to detect when multiple nodes attempted the same action — this is a sign of a stuck loop that should be pruned. 

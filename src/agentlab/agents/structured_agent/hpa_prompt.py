@@ -2,9 +2,10 @@ import abc
 import logging
 from dataclasses import dataclass
 
-import agentlab.agents.structured_agent.hpa as hpa
 from agentlab.agents import dynamic_prompting as dp
 from agentlab.agents.generic_agent.generic_agent_prompt import GenericPromptFlags
+from agentlab.agents.structured_agent.andor_tree import Node as PlanNode
+from agentlab.agents.structured_agent.andor_tree import NodeType as PlanNodeType
 from agentlab.llm.llm_utils import (
     HumanMessage,
     ParseError,
@@ -305,11 +306,12 @@ The tree below shows the current plan. Node status indicators:
 - [RECOVERABLE]: failed but recovery is in progress (new children being generated)
 - [NOT_RECOVERABLE]: failed permanently and cannot be retried
 - [DELETED]: a node that was deleted from the plan because of pruning or because a previous node failed
+- [EXHAUSTED]: permanently failed in a previous recovery cycle; kept as a record of what was already attempted — DO NOT repeat these approaches
 
 IMPORTANT:
 - DO NOT duplicate work covered by sibling nodes.
-- Analyze [NOT_RECOVERABLE] nodes carefully and propose a DIFFERENT strategy.
-- If previous [NOT_RECOVERABLE] nodes are listed, avoid repeating the same approach.
+- Analyze [NOT_RECOVERABLE] and [EXHAUSTED] nodes carefully and propose a DIFFERENT strategy.
+- If previous [NOT_RECOVERABLE] or [EXHAUSTED] nodes are listed, avoid repeating the same approach.
 - Examine the [action: ...] annotations on completed nodes to understand what
   concrete actions were already attempted. If multiple nodes executed the same
   action without progress, do NOT plan another node that would repeat it.
@@ -664,7 +666,7 @@ The previous attempt failed because [describe root cause]. The new plan avoids t
             return {"recovery_reasoning": text_answer, "parse_error": str(e)}
 
 
-def _format_children_status(node: hpa.Node) -> str:
+def _format_children_status(node: PlanNode) -> str:
     lines = []
     for child in node.children:
         status = child.status.name
@@ -680,7 +682,7 @@ def _format_children_status(node: hpa.Node) -> str:
 class AndRecoveryPrompt(dp.Shrinkable):
     def __init__(
         self,
-        node: hpa.Node,
+        node: PlanNode,
         obs_history: list[dict],
         flags: HPAPromptFlags,
     ):
@@ -710,6 +712,7 @@ while keeping the work that already succeeded.
 
 Children marked [SUCCESS] have completed their work — do NOT regenerate them.
 Children marked [NOT_RECOVERABLE] have failed permanently — read their FAILURE REASON carefully.
+Children marked [EXHAUSTED] failed in an earlier recovery cycle — their FAILURE REASON is shown; do NOT repeat the same approach.
 Children marked [DELETED] were invalidated by a sibling failure.
 
 ## CRITICAL — Failure Analysis:
@@ -719,7 +722,7 @@ interaction method (e.g. type into the field, use keyboard navigation, click a d
 element). Simply rephrasing the same action is NOT acceptable.
 
 ## Action-Intent Mismatch Check:
-For each [NOT_RECOVERABLE] child, compare its *description* (the intended goal) with the
+For each [NOT_RECOVERABLE] or [EXHAUSTED] child, compare its *description* (the intended goal) with the
 *action actually executed*. If the action targeted a completely different element than
 described, the failure may be a targeting error rather than a flawed approach.
 In such cases, the original approach may still be valid — consider retrying the same
@@ -776,7 +779,7 @@ first new child should re-establish them.
             clean_text = child_text.strip()
             if not clean_text:
                 continue
-            child = hpa.Node(type=hpa.NodeType.UNKNOWN, description=clean_text, parent=self.node)
+            child = PlanNode(type=PlanNodeType.UNKNOWN, description=clean_text, parent=self.node)
             self.node.add_child(child)
 
         return ans_dict
@@ -785,7 +788,7 @@ first new child should re-establish them.
 class OrRecoveryPrompt(dp.Shrinkable):
     def __init__(
         self,
-        node: hpa.Node,
+        node: PlanNode,
         obs_history: list[dict],
         flags: HPAPromptFlags,
     ):
@@ -821,7 +824,7 @@ a specific interaction method, your new strategies must use entirely different m
 Simply rephrasing the same strategy is NOT acceptable.
 
 ## Action-Intent Mismatch Check:
-For each [NOT_RECOVERABLE] child, compare its *description* (the intended goal) with the
+For each [NOT_RECOVERABLE] or [EXHAUSTED] child, compare its *description* (the intended goal) with the
 *action actually executed*. If the action targeted a completely different element than
 described, the failure may be a targeting error rather than a flawed approach.
 In such cases, the original approach may still be valid — consider retrying the same
@@ -877,7 +880,7 @@ first new child should re-establish them.
             clean_text = child_text.strip()
             if not clean_text:
                 continue
-            child = hpa.Node(type=hpa.NodeType.UNKNOWN, description=clean_text, parent=self.node)
+            child = PlanNode(type=PlanNodeType.UNKNOWN, description=clean_text, parent=self.node)
             self.node.add_child(child)
 
         return ans_dict
@@ -886,7 +889,7 @@ first new child should re-establish them.
 class PlanningPrompt(dp.Shrinkable):
     def __init__(
         self,
-        node: hpa.Node,
+        node: PlanNode,
         obs_history: list[dict],
         actions: list[str],
         memories: list[str],
@@ -1020,13 +1023,13 @@ answer:
             )
 
         if node_type == "ACTION":
-            self.node.type = hpa.NodeType.ACTION
+            self.node.type = PlanNodeType.ACTION
             return ans_dict
 
         if node_type not in {"AND", "OR"}:
             raise ParseError("node_type must be ACTION, AND, or OR.")
 
-        self.node.type = hpa.NodeType.AND if node_type == "AND" else hpa.NodeType.OR
+        self.node.type = PlanNodeType.AND if node_type == "AND" else PlanNodeType.OR
 
         self.node.description = ans_dict.get("node_description", self.node.description)
 
@@ -1039,7 +1042,7 @@ answer:
             if not isinstance(child_text, str):
                 continue
             clean_text = child_text.strip()
-            child = hpa.Node(type=hpa.NodeType.UNKNOWN, description=clean_text, parent=self.node)
+            child = PlanNode(type=PlanNodeType.UNKNOWN, description=clean_text, parent=self.node)
             self.node.add_child(child)
 
         return ans_dict

@@ -84,8 +84,9 @@ class TreeUpdateEngine:
             if node.status == NodeStatus.DELETED:
                 return
             nodes_list.append(node)
-            for child in node.children:
-                walk_tree(child, nodes_list)
+            if node.status != NodeStatus.EXHAUSTED: # Do not recurse into exhausted subtrees — they are dead branches kept only for LLM context
+                for child in node.children:
+                    walk_tree(child, nodes_list)
             return nodes_list
 
         if not stack_items:
@@ -108,15 +109,14 @@ class TreeUpdateEngine:
     def _is_protected_from_pruning(self, node: Node) -> bool:
         """A node is protected if it already succeeded or is an untried
         alternative under an OR parent (the tree logic should decide its fate,
-        not the global-update LLM)."""
-        if node.status == NodeStatus.SUCCESS:
-            return True
-        if node.status == NodeStatus.VISITED:
+        not the global-update LLM). EXHAUSTED nodes are also protected because
+        they are archived failure history and pruning them would erase that context."""
+        if node.status in {NodeStatus.VISITED, NodeStatus.SUCCESS, NodeStatus.EXHAUSTED}:
             return True
         if (
             node.parent is not None
             and node.parent.type == NodeType.OR
-            and node.status in {NodeStatus.UNVISITED, NodeStatus.VISITED}
+            and node.status == NodeStatus.UNVISITED
         ):
             return True
         return False
