@@ -181,6 +181,6 @@ class HPA:
         if self.previous_attempt_summaries:
             lines.append("\n## Previous Failed Attempts:")
             for i, summary in enumerate(self.previous_attempt_summaries):
-                lines.insert(0, f"\n### Attempt {i + 1}:\n{summary}")
+                lines.append(f"\n### Attempt {i + 1}:\n{summary}")
 
         return "\n".join(lines)

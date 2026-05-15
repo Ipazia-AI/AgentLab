@@ -205,7 +205,7 @@ class Node(BaseModel):
                 )
             )
 
-            if node.id in ancestor_ids:
+            if node.id in ancestor_ids or node.status == NodeStatus.NOT_RECOVERABLE:
                 for child in node.children:
                     _render(child, depth + 1, show_deleted)
 
