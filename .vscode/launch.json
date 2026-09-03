@@ -20,9 +20,21 @@
             "type": "debugpy",
             "python": "${workspaceFolder}/.venv/bin/python",
             "request": "launch",
-            "program": "tutorials/4_hpa_on_workarena/experiment.py",
+            "program": "tutorials/4_hpa_on_workarena/experiment_double_llms_annotated_tasks_l2.py",
             "console": "integratedTerminal",
             "justMyCode": false,
+            "envFile": "${workspaceFolder}/.env"
+        },
+        {
+            "name": "WorkArena data analysis",
+            "type": "debugpy",
+            "request": "launch",
+            "python": "${workspaceFolder}/.venv/bin/python",
+            "program": "${workspaceFolder}/data_analysis/analysis_cli.py",
+            "cwd": "${workspaceFolder}/data_analysis",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "args": "hpa_planner_gemini-3-flash_actor_gpt-5_59.6",
             "envFile": "${workspaceFolder}/.env"
         }
     ]
