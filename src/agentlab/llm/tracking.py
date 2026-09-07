@@ -103,7 +103,7 @@ def get_pricing_openrouter():
 
     model_metadata = response.json()
     return {
-        model["id"]: {k: float(v) for k, v in model["pricing"].items()}
+        model["id"]: {k: float(v) for k, v in model["pricing"].items() if not isinstance(v, list)}
         for model in model_metadata["data"]
     }
 
