@@ -7,7 +7,6 @@ from typing import Any, Dict, List, Literal, Optional, Union
 
 import openai
 from anthropic import Anthropic
-from anthropic.types import Completion
 from anthropic.types import Message as AnthrophicMessage
 from openai import OpenAI
 
@@ -786,7 +785,7 @@ class ClaudeResponseModel(BaseModelWithPricing):
         self.client = Anthropic(**client_args)
         self.init_pricing_tracker(pricing_api="anthropic")  # Use the PricingMixin
 
-    def _call_api(self, payload: APIPayload) -> Completion:
+    def _call_api(self, payload: APIPayload) -> AnthrophicMessage:
         sys_msg, other_msgs = self.filter_system_messages(payload.messages)
         sys_msg_text = "\n".join(c["text"] for m in sys_msg for c in m.content)
         input = []
