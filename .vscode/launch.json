@@ -26,6 +26,20 @@
             "envFile": "${workspaceFolder}/.env"
         },
         {
+            "name": "Telos",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/tutorials/5_telos_on_workarena/experiment.py",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "python": "${workspaceFolder}/.venv/bin/python",
+            "justMyCode": false,
+            "envFile": "${workspaceFolder}/.env",
+            "env": {
+                "AGENTLAB_DEBUG": "1"
+            }
+        },
+        {
             "name": "WorkArena data analysis",
             "type": "debugpy",
             "request": "launch",
