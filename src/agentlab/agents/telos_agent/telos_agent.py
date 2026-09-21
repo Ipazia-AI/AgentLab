@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 from bgym import Benchmark, HighLevelActionSetArgs
 from browsergym.experiments.agent import Agent, AgentInfo
-from telos import ActionNode, Result, Status, Telos
+from telos import ActionNode, Result, Telos
 from telos.errors import PlannerError
 
 from agentlab.agents import dynamic_prompting as dp
@@ -18,7 +18,12 @@ from agentlab.agents.telos_agent.obs import (
     observation_to_text,
 )
 from agentlab.agents.telos_agent.planner_llm import AgentLabPlannerLLM
-from agentlab.llm.tracking import cost_tracker_decorator
+from agentlab.agents.telos_agent.telemetry import (
+    build_telos_plan,
+    format_telos_plan_markdown,
+    make_recording_planner,
+)
+from agentlab.llm.tracking import LLMTracker, cost_tracker_decorator, set_tracker
 
 if TYPE_CHECKING:
     from agentlab.llm.chat_api import BaseModelArgs
@@ -119,11 +124,13 @@ class TelosAgent(Agent):
         self._obs_preprocessor = make_preprocessor(obs_flags)
         self.action_set = action_set if action_set is not None else action_set_args.make_action_set()
         self._planner_llm = AgentLabPlannerLLM(planner_model_args.make_model())
+        self._recording_llm, self._recorder = make_recording_planner(self._planner_llm)
         self._actor = Actor(
             chat_model=actor_model_args.make_model(),
             action_set=self.action_set,
             max_retry=max_retry,
         )
+        self._completed_steps: list[str] = []
         self._session = session
 
     def obs_preprocessor(self, obs: dict) -> dict:
@@ -132,9 +139,11 @@ class TelosAgent(Agent):
     @cost_tracker_decorator
     def get_action(self, obs: dict) -> tuple[str | None, AgentInfo]:
         observation = observation_to_text(obs, use_html=self.obs_flags.use_html)
+        last_action_error = obs.get("last_action_error") or ""
         if self._session is None:
             self._session = Telos(
-                planner_llm=self._planner_llm,
+                planner_llm=self._recording_llm,
+                planner=self._recorder,
                 horizon_T=self.horizon_T,
                 goal=goal_from_obs(obs),
                 action_set=self.action_set.describe(
@@ -142,24 +151,38 @@ class TelosAgent(Agent):
                 ),
             )
 
-        outcome = self._step_with_retry(observation)
-        grounded = self._actor.ground(
-            outcome.description, obs.get("axtree_txt") or observation
-        )
-        action = grounded.action
+        with set_tracker(suffix="planner") as planner_tracker:
+            outcome = self._step_with_retry(observation)
+        if isinstance(outcome, Result):
+            grounded = None
+            actor_stats = LLMTracker("actor").stats
+        else:
+            with set_tracker(suffix="actor") as actor_tracker:
+                grounded = self._actor.ground(
+                    outcome.description, obs.get("axtree_txt") or observation
+                )
+            actor_stats = actor_tracker.stats
 
-        return action, self._agent_info(outcome, grounded)
+        agent_info = self._agent_info(outcome, grounded, last_action_error)
+        agent_info.stats.update(planner_tracker.stats)
+        agent_info.stats.update(actor_stats)
+        if isinstance(outcome, ActionNode):
+            self._completed_steps.append(outcome.description)
+        return None if grounded is None else grounded.action, agent_info
 
     def _step_with_retry(self, observation: str) -> ActionNode | Result:
         last_error = None
         for _ in range(self.max_retry):
             try:
+                self._recorder.reset()
                 return self._session.step(observation)
             except PlannerError as exc:
                 last_error = exc
         raise last_error
 
-    def _agent_info(self, outcome: ActionNode | Result, grounded) -> AgentInfo:
+    def _agent_info(
+        self, outcome: ActionNode | Result, grounded, last_action_error: str
+    ) -> AgentInfo:
         state = self._session.snapshot() if self._session is not None else None
         tree_view = state.tree.render_view() if state is not None else None
         is_result = isinstance(outcome, Result)
@@ -167,6 +190,14 @@ class TelosAgent(Agent):
             f"Telos terminal: {outcome.status.name}"
             if is_result
             else f"[{outcome.id}] {outcome.description}"
+        )
+        plan = build_telos_plan(
+            state,
+            self._recorder,
+            outcome,
+            grounded,
+            last_action_error,
+            self._completed_steps,
         )
         stats = {
             "telos_step": state.t if state is not None else 0,
@@ -179,10 +210,12 @@ class TelosAgent(Agent):
             "terminal": outcome.status.name if is_result else None,
             "tree_view": tree_view,
             "actor_raw": grounded.raw if grounded else None,
+            "telos_plan": plan,
         }
         return AgentInfo(
             think=think,
-            chat_messages=grounded.chat_messages if grounded else [],
+            chat_messages=grounded.chat_messages if grounded and grounded.chat_messages else [],
             stats=stats,
+            markdown_page=format_telos_plan_markdown(plan),
             extra_info=extra_info,
         )
