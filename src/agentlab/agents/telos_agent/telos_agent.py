@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 from bgym import Benchmark, HighLevelActionSetArgs
 from browsergym.experiments.agent import Agent, AgentInfo
-from telos import ActionNode, Result, Telos
+from telos import ActionNode, Result, Status, Telos
 from telos.errors import PlannerError
 
 from agentlab.agents import dynamic_prompting as dp
@@ -131,6 +131,10 @@ class TelosAgent(Agent):
             max_retry=max_retry,
         )
         self._completed_steps: list[str] = []
+        self._action_history = {
+            "telos_high_level_action": [],
+            "actor_grounded_action": [],
+        }
         self._session = session
 
     def obs_preprocessor(self, obs: dict) -> dict:
@@ -153,14 +157,26 @@ class TelosAgent(Agent):
 
         with set_tracker(suffix="planner") as planner_tracker:
             outcome = self._step_with_retry(observation)
-        if isinstance(outcome, Result):
+        if isinstance(outcome, Result) and outcome.status in (
+            Status.HORIZON_REACHED,
+            Status.FAILED,
+        ):
             grounded = None
             actor_stats = LLMTracker("actor").stats
         else:
             with set_tracker(suffix="actor") as actor_tracker:
+                if isinstance(outcome, Result) and outcome.status == Status.GOAL_REACHED:
+                    outcome_description = "Goal reached."
+                else:
+                    outcome_description = outcome.description
                 grounded = self._actor.ground(
-                    outcome.description, obs.get("axtree_txt") or observation
+                    instruction=outcome_description,
+                    axtree_txt=obs.get("axtree_txt") or observation,
+                    action_history=self._action_history,
                 )
+                if grounded.action is not None:
+                    self._action_history["telos_high_level_action"].append(outcome_description)
+                    self._action_history["actor_grounded_action"].append(grounded.action)
             actor_stats = actor_tracker.stats
 
         agent_info = self._agent_info(outcome, grounded, last_action_error)

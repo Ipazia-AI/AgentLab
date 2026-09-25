@@ -36,9 +36,16 @@ class Actor:
         self.action_set = action_set
         self.max_retry = max_retry
 
-    def ground(self, instruction: str, axtree_txt: str) -> GroundedAction:
+    def ground(self, instruction: str, axtree_txt: str, action_history: dict) -> GroundedAction:
         action_space = self.action_set.describe(
             with_long_description=True, with_examples=True
+        )
+        action_history_formatted = '\n'.join(
+            f"{high_level}: {grounded}"
+            for high_level, grounded in zip(
+                action_history['telos_high_level_action'],
+                action_history['actor_grounded_action']
+            )
         )
         messages = Discussion(
             [
@@ -47,7 +54,9 @@ class Actor:
                     f"# Instruction\n{instruction}\n\n"
                     f"# Action space\n{action_space}\n\n"
                     f"# Current page (accessibility tree)\n{axtree_txt}\n\n"
-                    "Return exactly one action. The following is an example of the expected output format:\n"
+                    "# History of past actions (telos high level instructions and grounded environment actions)\n"
+                    f"{action_history_formatted}\n\n"
+                    "Return exactly one action. The following is an example of the expected output format. Make sure to return the action between <action> and </action> tags.\n"
                     "<action>\nclick('12')\n</action>"
                 ),
             ]
